@@ -417,19 +417,26 @@ def _stage_dry_run(tool: dict, code: str) -> StageResult:
         # Execute the code so functions are defined in namespace
         exec(compile(tree, "<generated_tool>", "exec"), namespace)  # noqa: S102
 
-        # Call each declared function with stub arguments
+        # Call each declared function — use example values when available, else stubs
         for fn_schema in tool.get("functions", []):
             fn_name = fn_schema.get("name")
             if not fn_name or fn_name not in namespace:
                 continue
 
             fn_callable = namespace[fn_name]
-            stub_kwargs: dict[str, Any] = {}
+            call_kwargs: dict[str, Any] = {}
+            used_examples: list[str] = []
             for param in fn_schema.get("parameters", []):
-                stub_kwargs[param["name"]] = _stub_value(param.get("type", "str"))
+                example_val = param.get("example")  # None if not provided
+                if example_val is not None:
+                    call_kwargs[param["name"]] = example_val
+                    used_examples.append(param["name"])
+                else:
+                    call_kwargs[param["name"]] = _stub_value(param.get("type", "str"))
 
             try:
-                ret = fn_callable(**stub_kwargs)
+                input_source = f"examples ({used_examples})" if used_examples else "stubs"
+                ret = fn_callable(**call_kwargs)
 
                 # Verify return type
                 expected_rt = fn_schema.get("return_type", "dict")
@@ -442,14 +449,27 @@ def _stage_dry_run(tool: dict, code: str) -> StageResult:
                         f"Function '{fn_name}' declared return_type='list' but returned {type(ret).__name__}"
                     )
 
-                # Verify output keys (best-effort)
+                # Verify output keys presence
                 if isinstance(ret, dict):
-                    declared_outputs = {o["name"] for o in fn_schema.get("outputs", [])}
-                    missing_keys = declared_outputs - set(ret.keys())
+                    declared_outputs = {o["name"]: o for o in fn_schema.get("outputs", [])}
+                    missing_keys = set(declared_outputs) - set(ret.keys())
                     if missing_keys:
                         result.add_warning(
-                            f"Function '{fn_name}' return dict is missing declared output keys: {missing_keys}"
+                            f"Function '{fn_name}' [{input_source}] return dict missing declared keys: {missing_keys}"
                         )
+
+                    # If output.example is provided, verify actual value type matches example type
+                    for out_name, out_schema in declared_outputs.items():
+                        out_example = out_schema.get("example")
+                        if out_example is not None and out_name in ret:
+                            expected_type = type(out_example)
+                            actual_val = ret[out_name]
+                            if not isinstance(actual_val, expected_type):
+                                result.add_warning(
+                                    f"Function '{fn_name}' output '{out_name}': "
+                                    f"expected {expected_type.__name__} (from example) "
+                                    f"but got {type(actual_val).__name__}"
+                                )
 
                 verified.append(fn_name)
 
