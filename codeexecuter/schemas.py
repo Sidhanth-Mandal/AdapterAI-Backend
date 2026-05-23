@@ -16,6 +16,7 @@ class OutputFieldSchema(BaseModel):
     name: str = Field(..., description="Output field name")
     type: str = Field(..., description="Output field type as a string, e.g. 'str', 'int', 'list', 'dict'")
     description: str = Field(..., description="Explanation of returned field")
+    example: Optional[Any] = Field(default=None,description="Example value for the parameter")
 
 
 class FunctionSchema(BaseModel):
