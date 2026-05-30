@@ -1,0 +1,260 @@
+{
+  "tool_name": "weather_expert_tool",
+  "tool_description": "A weather expert tool that provides current temperature, weekly forecasts, and multi-city comparisons using the free Open-Meteo API — no API key required.",
+  "category": "weather",
+  "dependencies": [
+    "requests",
+    "urllib3"
+  ],
+  "functions": [
+    {
+      "name": "get_city_temperature",
+      "description": "Fetch the current temperature for a given city name using the Open-Meteo geocoding and weather APIs.",
+      "parameters": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "Name of the city to query temperature for (e.g. 'London', 'Tokyo', 'New York').",
+          "required": true,
+          "example": "London"
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit: 'celsius' or 'fahrenheit'. Defaults to 'celsius'.",
+          "required": false,
+          "example": "celsius"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "Resolved city name.",
+          "example": "London"
+        },
+        {
+          "name": "country",
+          "type": "str",
+          "description": "Country the city belongs to.",
+          "example": "United Kingdom"
+        },
+        {
+          "name": "latitude",
+          "type": "float",
+          "description": "Latitude coordinate of the city.",
+          "example": 51.5085
+        },
+        {
+          "name": "longitude",
+          "type": "float",
+          "description": "Longitude coordinate of the city.",
+          "example": -0.1257
+        },
+        {
+          "name": "temperature",
+          "type": "float",
+          "description": "Current temperature at the queried city.",
+          "example": 18.4
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Unit of the returned temperature value.",
+          "example": "celsius"
+        },
+        {
+          "name": "feels_like",
+          "type": "float",
+          "description": "Apparent (feels-like) temperature.",
+          "example": 16.1
+        },
+        {
+          "name": "wind_speed_kmh",
+          "type": "float",
+          "description": "Current wind speed in km/h.",
+          "example": 14.0
+        },
+        {
+          "name": "humidity_percent",
+          "type": "int",
+          "description": "Relative humidity percentage.",
+          "example": 72
+        },
+        {
+          "name": "weather_description",
+          "type": "str",
+          "description": "Human-readable weather condition description.",
+          "example": "Partly cloudy"
+        },
+        {
+          "name": "local_time",
+          "type": "str",
+          "description": "Current local ISO datetime at the location.",
+          "example": "2025-05-26T13:00"
+        }
+      ],
+      "return_type": "dict"
+    },
+    {
+      "name": "get_weekly_forecast",
+      "description": "Return a 7-day daily temperature forecast (min/max) for a given city.",
+      "parameters": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "City name to retrieve the forecast for.",
+          "required": true,
+          "example": "Paris"
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit: 'celsius' or 'fahrenheit'. Defaults to 'celsius'.",
+          "required": false,
+          "example": "celsius"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "Resolved city name.",
+          "example": "Paris"
+        },
+        {
+          "name": "country",
+          "type": "str",
+          "description": "Country of the city.",
+          "example": "France"
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit used.",
+          "example": "celsius"
+        },
+        {
+          "name": "forecast",
+          "type": "list",
+          "description": "List of 7 daily forecast dicts, each with 'date', 'temp_min', 'temp_max', and 'weather_description'.",
+          "example": [
+            {
+              "date": "2025-05-26",
+              "temp_min": 14.2,
+              "temp_max": 23.8,
+              "weather_description": "Partly cloudy"
+            }
+          ]
+        }
+      ],
+      "return_type": "dict"
+    },
+    {
+      "name": "compare_cities_temperature",
+      "description": "Compare the current temperature of multiple cities side-by-side and identify the hottest and coldest.",
+      "parameters": [
+        {
+          "name": "cities",
+          "type": "list",
+          "description": "List of city name strings to compare (2–10 cities).",
+          "required": true,
+          "example": ["Mumbai", "Dubai", "London", "Toronto"]
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit: 'celsius' or 'fahrenheit'. Defaults to 'celsius'.",
+          "required": false,
+          "example": "celsius"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit used for all values.",
+          "example": "celsius"
+        },
+        {
+          "name": "results",
+          "type": "list",
+          "description": "List of dicts per city with 'city', 'country', 'temperature', 'feels_like', and 'weather_description'.",
+          "example": [
+            {
+              "city": "Mumbai",
+              "country": "India",
+              "temperature": 32.5,
+              "feels_like": 38.1,
+              "weather_description": "Thunderstorm"
+            }
+          ]
+        },
+        {
+          "name": "hottest",
+          "type": "dict",
+          "description": "City dict with the highest current temperature.",
+          "example": {"city": "Dubai", "country": "United Arab Emirates", "temperature": 41.2}
+        },
+        {
+          "name": "coldest",
+          "type": "dict",
+          "description": "City dict with the lowest current temperature.",
+          "example": {"city": "Toronto", "country": "Canada", "temperature": 8.7}
+        }
+      ],
+      "return_type": "dict"
+    },
+    {
+      "name": "get_hourly_temperature",
+      "description": "Retrieve the hourly temperature for the next 24 hours for a given city.",
+      "parameters": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "City name to retrieve hourly data for.",
+          "required": true,
+          "example": "Berlin"
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit: 'celsius' or 'fahrenheit'. Defaults to 'celsius'.",
+          "required": false,
+          "example": "celsius"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "city",
+          "type": "str",
+          "description": "Resolved city name.",
+          "example": "Berlin"
+        },
+        {
+          "name": "country",
+          "type": "str",
+          "description": "Country of the city.",
+          "example": "Germany"
+        },
+        {
+          "name": "unit",
+          "type": "str",
+          "description": "Temperature unit used.",
+          "example": "celsius"
+        },
+        {
+          "name": "hourly",
+          "type": "list",
+          "description": "List of 24 dicts each with 'time' (ISO string) and 'temperature'.",
+          "example": [
+            {"time": "2025-05-26T14:00", "temperature": 19.3},
+            {"time": "2025-05-26T15:00", "temperature": 20.1}
+          ]
+        }
+      ],
+      "return_type": "dict"
+    }
+  ],
+  "code": "import requests\nfrom typing import List, Optional\n\n_GEO_URL     = \"https://geocoding-api.open-meteo.com/v1/search\"\n_WEATHER_URL = \"https://api.open-meteo.com/v1/forecast\"\n_TIMEOUT     = 10\n\n_WMO_CODES = {\n    0: \"Clear sky\", 1: \"Mainly clear\", 2: \"Partly cloudy\", 3: \"Overcast\",\n    45: \"Fog\", 48: \"Icy fog\",\n    51: \"Light drizzle\", 53: \"Moderate drizzle\", 55: \"Dense drizzle\",\n    61: \"Slight rain\", 63: \"Moderate rain\", 65: \"Heavy rain\",\n    71: \"Slight snow\", 73: \"Moderate snow\", 75: \"Heavy snow\",\n    77: \"Snow grains\",\n    80: \"Slight showers\", 81: \"Moderate showers\", 82: \"Violent showers\",\n    85: \"Slight snow showers\", 86: \"Heavy snow showers\",\n    95: \"Thunderstorm\", 96: \"Thunderstorm with hail\", 99: \"Thunderstorm with heavy hail\",\n}\n\n\ndef _resolve_city(city: str) -> dict:\n    \"\"\"Geocode a city name to coordinates using Open-Meteo Geocoding API.\"\"\"\n    try:\n        resp = requests.get(\n            _GEO_URL,\n            params={\"name\": city, \"count\": 1, \"language\": \"en\", \"format\": \"json\"},\n            timeout=_TIMEOUT,\n        )\n        resp.raise_for_status()\n        data = resp.json().get(\"results\", [])\n        if not data:\n            return {\"error\": f\"City '{city}' not found.\"}\n        r = data[0]\n        return {\n            \"city\":      r.get(\"name\", city),\n            \"country\":   r.get(\"country\", \"\"),\n            \"latitude\":  r.get(\"latitude\"),\n            \"longitude\": r.get(\"longitude\"),\n            \"timezone\":  r.get(\"timezone\", \"UTC\"),\n        }\n    except requests.exceptions.Timeout:\n        return {\"error\": \"Geocoding request timed out.\"}\n    except requests.exceptions.RequestException as exc:\n        return {\"error\": str(exc)[:200]}\n\n\ndef _temp_params(unit: str) -> str:\n    \"\"\"Return the Open-Meteo temperature_unit parameter string.\"\"\"\n    return \"fahrenheit\" if unit.lower().startswith(\"f\") else \"celsius\"\n\n\ndef _wmo_description(code: Optional[int]) -> str:\n    \"\"\"Convert a WMO weather interpretation code to a human-readable string.\"\"\"\n    return _WMO_CODES.get(code, \"Unknown\")\n\n\n# ---------------------------------------------------------------------------\n# 1. Current temperature for a single city\n# ---------------------------------------------------------------------------\n\ndef get_city_temperature(city: str, unit: str = \"celsius\") -> dict:\n    \"\"\"\n    Fetch current temperature and weather conditions for a city.\n\n    Parameters\n    ----------\n    city : str   City name, e.g. 'London'.\n    unit : str   'celsius' or 'fahrenheit' (default 'celsius').\n\n    Returns\n    -------\n    dict  Containing city, country, temperature, feels_like, humidity,\n          wind_speed_kmh, weather_description, and local_time.\n    \"\"\"\n    geo = _resolve_city(city)\n    if \"error\" in geo:\n        return geo\n\n    tu = _temp_params(unit)\n    try:\n        resp = requests.get(\n            _WEATHER_URL,\n            params={\n                \"latitude\":             geo[\"latitude\"],\n                \"longitude\":            geo[\"longitude\"],\n                \"current\":              \"temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code\",\n                \"temperature_unit\":     tu,\n                \"wind_speed_unit\":      \"kmh\",\n                \"timezone\":             geo[\"timezone\"],\n            },\n            timeout=_TIMEOUT,\n        )\n        resp.raise_for_status()\n        data = resp.json()\n    except requests.exceptions.Timeout:\n        return {\"error\": \"Weather request timed out.\"}\n    except requests.exceptions.RequestException as exc:\n        return {\"error\": str(exc)[:200]}\n\n    cur = data.get(\"current\", {})\n    return {\n        \"city\":                geo[\"city\"],\n        \"country\":             geo[\"country\"],\n        \"latitude\":            geo[\"latitude\"],\n        \"longitude\":           geo[\"longitude\"],\n        \"temperature\":         cur.get(\"temperature_2m\"),\n        \"unit\":                tu,\n        \"feels_like\":          cur.get(\"apparent_temperature\"),\n        \"humidity_percent\":    cur.get(\"relative_humidity_2m\"),\n        \"wind_speed_kmh\":      cur.get(\"wind_speed_10m\"),\n        \"weather_description\": _wmo_description(cur.get(\"weather_code\")),\n        \"local_time\":          cur.get(\"time\", \"\"),\n    }\n\n\n# ---------------------------------------------------------------------------\n# 2. 7-day daily forecast\n# ---------------------------------------------------------------------------\n\ndef get_weekly_forecast(city: str, unit: str = \"celsius\") -> dict:\n    \"\"\"\n    Return a 7-day daily min/max temperature forecast for a city.\n\n    Parameters\n    ----------\n    city : str   City name.\n    unit : str   'celsius' or 'fahrenheit'.\n\n    Returns\n    -------\n    dict  { city, country, unit, forecast: list[dict] }\n    \"\"\"\n    geo = _resolve_city(city)\n    if \"error\" in geo:\n        return geo\n\n    tu = _temp_params(unit)\n    try:\n        resp = requests.get(\n            _WEATHER_URL,\n            params={\n                \"latitude\":         geo[\"latitude\"],\n                \"longitude\":        geo[\"longitude\"],\n                \"daily\":            \"temperature_2m_max,temperature_2m_min,weather_code\",\n                \"temperature_unit\": tu,\n                \"timezone\":         geo[\"timezone\"],\n                \"forecast_days\":    7,\n            },\n            timeout=_TIMEOUT,\n        )\n        resp.raise_for_status()\n        data = resp.json()\n    except requests.exceptions.Timeout:\n        return {\"error\": \"Forecast request timed out.\"}\n    except requests.exceptions.RequestException as exc:\n        return {\"error\": str(exc)[:200]}\n\n    daily = data.get(\"daily\", {})\n    dates      = daily.get(\"time\", [])\n    temp_max   = daily.get(\"temperature_2m_max\", [])\n    temp_min   = daily.get(\"temperature_2m_min\", [])\n    wmo_codes  = daily.get(\"weather_code\", [])\n\n    forecast = [\n        {\n            \"date\":                dates[i],\n            \"temp_min\":            temp_min[i],\n            \"temp_max\":            temp_max[i],\n            \"weather_description\": _wmo_description(wmo_codes[i] if i < len(wmo_codes) else None),\n        }\n        for i in range(len(dates))\n    ]\n    return {\"city\": geo[\"city\"], \"country\": geo[\"country\"], \"unit\": tu, \"forecast\": forecast}\n\n\n# ---------------------------------------------------------------------------\n# 3. Multi-city temperature comparison\n# ---------------------------------------------------------------------------\n\ndef compare_cities_temperature(cities: List[str], unit: str = \"celsius\") -> dict:\n    \"\"\"\n    Compare current temperatures across multiple cities.\n\n    Parameters\n    ----------\n    cities : list[str]  2–10 city names.\n    unit   : str        'celsius' or 'fahrenheit'.\n\n    Returns\n    -------\n    dict  { unit, results: list, hottest: dict, coldest: dict }\n    \"\"\"\n    results = []\n    for city_name in cities[:10]:\n        row = get_city_temperature(city_name, unit)\n        if \"error\" not in row:\n            results.append({\n                \"city\":                row[\"city\"],\n                \"country\":             row[\"country\"],\n                \"temperature\":         row[\"temperature\"],\n                \"feels_like\":          row[\"feels_like\"],\n                \"weather_description\": row[\"weather_description\"],\n            })\n\n    if not results:\n        return {\"error\": \"Could not retrieve temperature for any of the requested cities.\"}\n\n    valid = [r for r in results if r[\"temperature\"] is not None]\n    hottest = max(valid, key=lambda x: x[\"temperature\"]) if valid else {}\n    coldest = min(valid, key=lambda x: x[\"temperature\"]) if valid else {}\n\n    return {\n        \"unit\":    _temp_params(unit),\n        \"results\": results,\n        \"hottest\": hottest,\n        \"coldest\": coldest,\n    }\n\n\n# ---------------------------------------------------------------------------\n# 4. Hourly temperature (next 24 hours)\n# ---------------------------------------------------------------------------\n\ndef get_hourly_temperature(city: str, unit: str = \"celsius\") -> dict:\n    \"\"\"\n    Retrieve hourly temperature for the next 24 hours for a city.\n\n    Parameters\n    ----------\n    city : str  City name.\n    unit : str  'celsius' or 'fahrenheit'.\n\n    Returns\n    -------\n    dict  { city, country, unit, hourly: list[dict] }\n    \"\"\"\n    geo = _resolve_city(city)\n    if \"error\" in geo:\n        return geo\n\n    tu = _temp_params(unit)\n    try:\n        resp = requests.get(\n            _WEATHER_URL,\n            params={\n                \"latitude\":         geo[\"latitude\"],\n                \"longitude\":        geo[\"longitude\"],\n                \"hourly\":           \"temperature_2m\",\n                \"temperature_unit\": tu,\n                \"timezone\":         geo[\"timezone\"],\n                \"forecast_days\":    2,\n            },\n            timeout=_TIMEOUT,\n        )\n        resp.raise_for_status()\n        data = resp.json()\n    except requests.exceptions.Timeout:\n        return {\"error\": \"Hourly forecast request timed out.\"}\n    except requests.exceptions.RequestException as exc:\n        return {\"error\": str(exc)[:200]}\n\n    hourly = data.get(\"hourly\", {})\n    times  = hourly.get(\"time\", [])[:24]\n    temps  = hourly.get(\"temperature_2m\", [])[:24]\n\n    return {\n        \"city\":    geo[\"city\"],\n        \"country\": geo[\"country\"],\n        \"unit\":    tu,\n        \"hourly\":  [{\"time\": times[i], \"temperature\": temps[i]} for i in range(len(times))],\n    }\n"
+}
