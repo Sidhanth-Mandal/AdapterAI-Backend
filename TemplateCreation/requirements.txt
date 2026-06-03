@@ -1,0 +1,14 @@
+# Core pipeline
+langgraph>=1.0.1,<2.0.0
+langchain-groq>=0.3.8,<1.0.0
+langchain-core>=0.3.45,<1.0.0
+python-dotenv>=1.0.0
+
+# Database
+psycopg2-binary>=2.9.0   # PostgreSQL driver (binary wheel, no libpq build required)
+
+# Cache
+redis>=5.0.0             # redis-py with built-in connection pooling
+
+# Token counting
+tiktoken>=0.7.0          # Fast, pure-memory BPE tokenizer (cl100k_base)
