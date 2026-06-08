@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS Templates (
     template_id             VARCHAR PRIMARY KEY,
     name                    VARCHAR NOT NULL,
     description             TEXT,
-    system_prompt           TEXT,
+    behaviour_prompt        TEXT,
     tool_generation_prompt  TEXT,
     tool_information        TEXT,
     created_by              VARCHAR NOT NULL,
@@ -222,7 +222,7 @@ def insert_template(
     user_id: str,
     name: str,
     description: str,
-    system_prompt: str,
+    behaviour_prompt: str,
     tool_generation_prompt: str,
 ) -> None:
     """
@@ -237,12 +237,12 @@ def insert_template(
     sql = """
         INSERT INTO Templates
             (template_id, created_by, name, description,
-             system_prompt, tool_generation_prompt)
+             behaviour_prompt, tool_generation_prompt)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (template_id) DO UPDATE SET
             name                   = EXCLUDED.name,
             description            = EXCLUDED.description,
-            system_prompt          = EXCLUDED.system_prompt,
+            behaviour_prompt       = EXCLUDED.behaviour_prompt,
             tool_generation_prompt = EXCLUDED.tool_generation_prompt,
             updated_at             = CURRENT_TIMESTAMP
     """
@@ -253,6 +253,6 @@ def insert_template(
                 user_id,
                 name,
                 description,
-                system_prompt,
+                behaviour_prompt,
                 tool_generation_prompt,
             ))

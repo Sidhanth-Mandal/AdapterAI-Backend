@@ -13,7 +13,7 @@ Example
 import json
 import sys
 
-from pipeline import generate_tool
+from .pipeline import generate_tool
 
 
 def main() -> None:

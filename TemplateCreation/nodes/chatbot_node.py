@@ -21,7 +21,7 @@ from pathlib import Path
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from state import GraphState
+from TemplateCreation.state import GraphState
 from utils.extraction import check_satisfaction_signal, clean_chatbot_response
 
 

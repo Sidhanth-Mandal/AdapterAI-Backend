@@ -33,6 +33,7 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from ToolGeneration.pipeline import generate_tool
 
 # ---------------------------------------------------------------------------
 # Ensure TemplateCreation/ is on sys.path so bare internal imports work
@@ -56,9 +57,9 @@ load_dotenv(dotenv_path=_ROOT_ENV if _ROOT_ENV.exists() else None, override=Fals
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from graph import build_graph
-from nodes.planner_node import planner_node
-from db.postgres_client import (
+from .graph import build_graph
+from .nodes.planner_node import planner_node
+from .db.postgres_client import (
     ensure_tables,
     get_messages,
     get_next_sequence_number,
@@ -66,7 +67,7 @@ from db.postgres_client import (
     insert_template,
     is_template_finalized,
 )
-from db.redis_client import (
+from .db.redis_client import (
     append_to_conversation_cache,
     get_conversation_cache,
     set_conversation_cache,
@@ -369,11 +370,13 @@ def chat_template(
         append_to_conversation_cache(template_id, new_cache_records)
 
     # -------------------------------------------------------------------
-    # 8. Phase transition: if satisfied, trigger Phase 2 automatically
+    # 8. Phase transition: if satisfied, trigger Phase 2 automatically and Generation of tool also starts 
     # -------------------------------------------------------------------
     if result.get("satisfied", False):
         full_history = _load_history(template_id)
         create_template(user_id, template_id, full_history)
+        generate_tool(template_id)
+
 
     return ai_response
 
@@ -426,7 +429,7 @@ def create_template(
     planner_result = planner_node(state)
 
     tool_generation_prompt = planner_result.get("tool_creation_prompt", "")
-    system_prompt          = planner_result.get("system_prompt",         "")
+    behaviour_prompt       = planner_result.get("system_prompt",         "")
 
     # -------------------------------------------------------------------
     # 3. Generate name + description via Groq
@@ -443,6 +446,6 @@ def create_template(
         user_id=user_id,
         name=name,
         description=description,
-        system_prompt=system_prompt,
+        behaviour_prompt=behaviour_prompt,
         tool_generation_prompt=tool_generation_prompt,
     )

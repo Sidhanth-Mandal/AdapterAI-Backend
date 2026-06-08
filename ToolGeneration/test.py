@@ -20,7 +20,7 @@ import sys, os, json, requests
 # ── make sure project root is on sys.path ─────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from codeexecuter.executer import execution_call
+from .executer import execution_call
 
 # ── config ────────────────────────────────────────────────────────────────────
 BASE_URL   = os.getenv("TOOL_RUNNER_URL", "http://localhost:8000")

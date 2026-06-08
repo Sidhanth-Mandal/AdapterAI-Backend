@@ -240,7 +240,7 @@ def test_temp_messages_crud() -> bool:
 def test_redis_cache() -> bool:
     _header("6. Redis Cache Operations")
     try:
-        from db.redis_client import (
+        from .db.redis_client import (
             get_conversation_cache,
             set_conversation_cache,
             append_to_conversation_cache,
@@ -360,7 +360,7 @@ def test_create_template_phase2() -> bool:
         import psycopg2
         conn = psycopg2.connect(os.environ["POSTGRES_DSN"])
         cur  = conn.cursor()
-        cur.execute("SELECT name, description, system_prompt, tool_generation_prompt FROM Templates WHERE template_id=%s", (phase2_id,))
+        cur.execute("SELECT name, description, behaviour_prompt, tool_generation_prompt FROM Templates WHERE template_id=%s", (phase2_id,))
         row = cur.fetchone()
         conn.close()
 
@@ -368,7 +368,7 @@ def test_create_template_phase2() -> bool:
         name, desc, sp, tgp = row
         _ok(f"name                  = {name}")
         _ok(f"description           = {(desc or '')[:80]}")
-        _ok(f"system_prompt         = {len(sp or '')} chars")
+        _ok(f"behaviour_prompt      = {len(sp or '')} chars")
         _ok(f"tool_generation_prompt= {len(tgp or '')} chars")
 
         # Cleanup this phase2_id
@@ -406,7 +406,7 @@ def test_finalization_guard() -> bool:
             user_id=TEST_USER_ID,
             name="Guard Test Template",
             description="Created to verify the finalization guard.",
-            system_prompt="You are a test assistant.",
+            behaviour_prompt="You are a test assistant.",
             tool_generation_prompt="Generate no tools.",
         )
         assert is_template_finalized(guard_id)

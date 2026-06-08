@@ -33,12 +33,12 @@ from typing import Any
 
 import requests as _requests  # aliased to avoid shadowing
 
-import db
-import generator
-import metadata as meta_module
-import redis_client
-from executer import execution_call
-from validator import validate_tool
+import ToolGeneration.db as db
+import ToolGeneration.generator as generator
+import ToolGeneration.metadata as meta_module
+import ToolGeneration.redis_client as redis_client
+from .executer import execution_call
+from .validator import validate_tool
 
 # ---------------------------------------------------------------------------
 # Config

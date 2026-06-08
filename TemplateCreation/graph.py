@@ -26,9 +26,9 @@ Graph structure
 
 from langgraph.graph import StateGraph, START, END
 
-from state import GraphState
-from nodes.chatbot_node import chatbot_node
-from nodes.planner_node import planner_node
+from .state import GraphState
+from .nodes.chatbot_node import chatbot_node
+from .nodes.planner_node import planner_node
 
 
 # ---------------------------------------------------------------------------

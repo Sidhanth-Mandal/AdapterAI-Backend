@@ -22,7 +22,7 @@ from pathlib import Path
 # Ensure codeexecuter/ is importable when run from project root
 sys.path.insert(0, str(Path(__file__).parent))
 
-from validator import validate_tool, ValidationReport, StageResult
+from .validator import validate_tool, ValidationReport, StageResult
 
 # ---------------------------------------------------------------------------
 # ANSI colour helpers (work on Windows 10+ with ENABLE_VIRTUAL_TERMINAL)

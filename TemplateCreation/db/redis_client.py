@@ -19,7 +19,6 @@ import json
 import os
 from typing import List, Dict, Optional
 
-import redis
 from redis import ConnectionPool, Redis
 
 

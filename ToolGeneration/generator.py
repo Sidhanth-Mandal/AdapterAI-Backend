@@ -24,8 +24,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from schemas import ToolSchema
-from SystemPrompt import system_prompt
+from ToolGeneration.schemas import ToolSchema
+from ToolGeneration.SystemPrompt import system_prompt
 
 load_dotenv()
 
