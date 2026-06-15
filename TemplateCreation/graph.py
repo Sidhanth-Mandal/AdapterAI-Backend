@@ -46,7 +46,9 @@ def route_after_chatbot(state: GraphState) -> str:
                    In practice the graph will pause at the user_input interrupt.
     """
     if state.get("satisfied", False):
+        print("[TC:graph]   route_after_chatbot → 'plan' (satisfied=True, routing to planner_node)")
         return "plan"
+    print("[TC:graph]   route_after_chatbot → 'gather' (satisfied=False, waiting for next user input)")
     return "gather"
 
 
@@ -84,4 +86,6 @@ def build_graph():
     # --- Planner always terminates ---
     builder.add_edge("planner_node", END)
 
-    return builder.compile()
+    compiled = builder.compile()
+    print("[TC:graph]   build_graph() compiled successfully")
+    return compiled

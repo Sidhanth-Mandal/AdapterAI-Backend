@@ -39,6 +39,21 @@ class SignupRequest(BaseModel):
 # Chat schemas
 # ---------------------------------------------------------------------------
 
+class AttachmentInfo(BaseModel):
+    """
+    Optional file attachment carried with a chat message.
+
+    Clients that send a file must include all three fields.
+    The attachment is uploaded to Cloudflare R2 before the agent
+    is invoked; the resulting ``attachment_id`` (a UUID) is used as
+    the R2 object-key prefix AND the Attachments table primary key.
+    """
+    file_name: str = Field(..., description="Original file name, e.g. 'report.pdf'")
+    mime_type: str = Field(..., description="MIME type, e.g. 'application/pdf'")
+    # Base64-encoded file bytes supplied by the client
+    file_content_b64: str = Field(..., description="Base64-encoded file content")
+
+
 class ChatRequest(BaseModel):
     """
     Body for POST /chat/
@@ -46,11 +61,14 @@ class ChatRequest(BaseModel):
     conv_id      — existing conversation to continue, or a new UUID to create.
     template_id  — template that drives the agent's behaviour.
     user_prompt  — the user's message text.
-    if_attachment — set True when an uploaded file is part of the context.
+    attachment   — optional file attachment (file_name, mime_type, file_content_b64).
+    if_attachment — auto-set to True by the endpoint when an attachment is present;
+                    clients can also set it explicitly.
     """
     conv_id: str
     template_id: str
     user_prompt: str
+    attachment: Optional[AttachmentInfo] = None
     if_attachment: bool = False
 
 
@@ -58,6 +76,7 @@ class ChatResponse(BaseModel):
     """Returned by POST /chat/"""
     conv_id: str
     response: str
+    attachment_id: Optional[str] = None  # set when a file was uploaded
 
 
 # ---------------------------------------------------------------------------
@@ -147,3 +166,22 @@ class ConversationListResponse(BaseModel):
     """Returned by GET /loadconv/"""
     user_id: str
     conversations: List[ConversationRecord]
+
+
+# ---------------------------------------------------------------------------
+# Delete response schemas
+# ---------------------------------------------------------------------------
+
+class DeleteConversationResponse(BaseModel):
+    """Returned by DELETE /loadconv/{conv_id}"""
+    conv_id: str
+    deleted: bool
+    vector_store_cleaned: bool
+    supabase_files_deleted: int
+    supabase_errors: List[str] = []
+
+
+class DeleteTemplateResponse(BaseModel):
+    """Returned by DELETE /loadtemplate/{template_id}"""
+    template_id: str
+    deleted: bool

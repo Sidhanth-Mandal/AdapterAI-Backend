@@ -103,10 +103,12 @@ def ensure_tables() -> None:
     Safe to call multiple times — all statements use IF NOT EXISTS.
     Intended to be called once at service startup.
     """
+    print("[TC:pg]   ensure_tables() — verifying TEMP_MESSAGES and Templates tables exist …")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(_DDL_TEMP_MESSAGES)
             cur.execute(_DDL_TEMPLATES)
+    print("[TC:pg]   ensure_tables() — tables OK")
 
 
 # ---------------------------------------------------------------------------
@@ -147,12 +149,14 @@ def insert_message(
             (message_id, template_id, role, content, token_count, sequence_number)
         VALUES (%s, %s, %s, %s, %s, %s)
     """
+    print(f"[TC:pg]   insert_message | template_id={template_id!r} role={role!r} seq={sequence_number} tokens={token_count}")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 sql,
                 (message_id, template_id, role, content, token_count, sequence_number),
             )
+    print(f"[TC:pg]   insert_message done | message_id={message_id!r}")
     return message_id
 
 
@@ -172,10 +176,12 @@ def get_messages(template_id: str) -> List[Dict]:
         WHERE template_id = %s
         ORDER BY sequence_number ASC
     """
+    print(f"[TC:pg]   get_messages | template_id={template_id!r}")
     with get_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, (template_id,))
             rows = cur.fetchall()
+    print(f"[TC:pg]   get_messages returned {len(rows)} row(s)")
     return [dict(r) for r in rows]
 
 
@@ -190,11 +196,14 @@ def get_next_sequence_number(template_id: str) -> int:
         FROM TEMP_MESSAGES
         WHERE template_id = %s
     """
+    print(f"[TC:pg]   get_next_sequence_number | template_id={template_id!r}")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (template_id,))
             result = cur.fetchone()
-    return result[0] if result else 1
+    seq = result[0] if result else 1
+    print(f"[TC:pg]   next sequence number: {seq}")
+    return seq
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +220,13 @@ def is_template_finalized(template_id: str) -> bool:
     turns after the template has been generated.
     """
     sql = "SELECT 1 FROM Templates WHERE template_id = %s LIMIT 1"
+    print(f"[TC:pg]   is_template_finalized | template_id={template_id!r}")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (template_id,))
-            return cur.fetchone() is not None
+            finalized = cur.fetchone() is not None
+    print(f"[TC:pg]   is_template_finalized result: {finalized}")
+    return finalized
 
 
 def insert_template(
@@ -246,6 +258,7 @@ def insert_template(
             tool_generation_prompt = EXCLUDED.tool_generation_prompt,
             updated_at             = CURRENT_TIMESTAMP
     """
+    print(f"[TC:pg]   insert_template | template_id={template_id!r} user_id={user_id!r} name={name!r}")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (
@@ -256,3 +269,4 @@ def insert_template(
                 behaviour_prompt,
                 tool_generation_prompt,
             ))
+    print(f"[TC:pg]   insert_template done | template '{template_id}' upserted successfully")

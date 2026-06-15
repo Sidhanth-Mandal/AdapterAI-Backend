@@ -22,7 +22,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from TemplateCreation.state import GraphState
-from utils.extraction import check_satisfaction_signal, clean_chatbot_response
+from TemplateCreation.utils.extraction import check_satisfaction_signal, clean_chatbot_response
 
 
 # ---------------------------------------------------------------------------
@@ -75,20 +75,28 @@ def chatbot_node(state: GraphState) -> dict:
 
     # Build message list: system prompt + conversation history
     messages = [SystemMessage(content=_SYSTEM_PROMPT)] + list(state["messages"])
+    print(f"[TC:chatbot] ► chatbot_node fired | total messages (incl. system): {len(messages)}")
 
+    print(f"[TC:chatbot]   invoking Groq LLM (Phase 1 chatbot) …")
     response = llm.invoke(messages)
     full_response = response.content
+    print(f"[TC:chatbot]   LLM responded | raw response length: {len(full_response)} chars")
 
     # -----------------------------------------------------------------------
     # Check for satisfaction signal and strip it from the visible response
     # -----------------------------------------------------------------------
     satisfied        = check_satisfaction_signal(full_response)
     visible_response = clean_chatbot_response(full_response)
+    print(f"[TC:chatbot]   satisfaction signal detected: {satisfied}")
+    if satisfied:
+        print("[TC:chatbot]   [REQUIREMENTS_COMPLETE] found — phase will transition to 'planning'")
+    print(f"[TC:chatbot]   visible response length (after cleaning): {len(visible_response)} chars")
 
     # -----------------------------------------------------------------------
     # Build state update
     # -----------------------------------------------------------------------
     new_message = AIMessage(content=visible_response)
+    print(f"[TC:chatbot] ◄ chatbot_node returning | phase={'planning' if satisfied else 'gathering'}")
 
     return {
         "messages":  [new_message],

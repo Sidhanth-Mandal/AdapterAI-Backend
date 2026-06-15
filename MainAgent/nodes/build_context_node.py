@@ -24,6 +24,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from MainAgent.prompts import ORCHESTRATOR_SYSTEM_PROMPT, build_full_context
 from MainAgent.state import OrchestratorState
+from .orchestrator_agent_node import _safe_print
 
 
 async def build_context_node(state: OrchestratorState) -> dict:
@@ -51,5 +52,5 @@ async def build_context_node(state: OrchestratorState) -> dict:
         SystemMessage(content=system_content),
         HumanMessage(content=state["user_prompt"]),
     ]
-
+    _safe_print(messages)
     return {"messages": messages}

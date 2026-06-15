@@ -23,6 +23,8 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
+from langchain_anthropic import ChatAnthropic
+
 
 from ToolGeneration.schemas import ToolSchema
 from ToolGeneration.SystemPrompt import system_prompt
@@ -33,8 +35,8 @@ load_dotenv()
 # Shared Groq client
 # ---------------------------------------------------------------------------
 
-_MODEL_NAME = "llama-3.3-70b-versatile"
-_model = ChatGroq(model=_MODEL_NAME)
+_MODEL_NAME = "claude-sonnet-4-6"
+_model = ChatAnthropic(model=_MODEL_NAME)
 
 _SCHEMA_STR: str = json.dumps(ToolSchema.model_json_schema(), indent=2)
 
@@ -54,22 +56,83 @@ Schema:
 def _strip_fences(raw: str) -> str:
     """Remove markdown code fences if the model wraps its output in them."""
     raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```", 2)[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.rsplit("```", 1)[0].strip()
+    # Handle ```json ... ``` or ``` ... ``` anywhere in the response
+    if "```" in raw:
+        parts = raw.split("```")
+        # parts: [before, content, after] for a single fence pair
+        if len(parts) >= 3:
+            inner = parts[1]
+            if inner.startswith("json"):
+                inner = inner[4:]
+            raw = inner.strip()
     return raw
 
 
+def _sanitise_control_chars(raw: str) -> str:
+    """
+    Escape bare ASCII control characters (0x00-0x1F, except valid JSON
+    whitespace \t, \n, \r) that appear inside JSON string values.
+
+    The LLM sometimes returns literal newlines / tabs / carriage returns
+    embedded inside code-string values rather than the escaped forms
+    (\\n, \\t) required by the JSON spec — causing json.loads to raise
+    "Invalid control character".
+
+    Strategy: walk the raw string character-by-character, tracking whether
+    we are inside a JSON string (handling escaped quotes).  Replace any
+    bare control character found inside a string with its \\uXXXX form.
+    """
+    result: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(raw):
+        ch = raw[i]
+        if in_string:
+            if ch == "\\":          # escape sequence — keep as-is
+                result.append(ch)
+                i += 1
+                if i < len(raw):    # keep the escaped character too
+                    result.append(raw[i])
+                    i += 1
+                continue
+            elif ch == '"':         # closing quote
+                in_string = False
+                result.append(ch)
+            elif ord(ch) < 0x20:   # bare control character inside a string
+                result.append(f"\\u{ord(ch):04x}")
+            else:
+                result.append(ch)
+        else:
+            if ch == '"':           # opening quote
+                in_string = True
+                result.append(ch)
+            else:
+                result.append(ch)
+        i += 1
+    return "".join(result)
+
+
 def _parse_json(raw: str) -> dict:
-    """Try json_repair first, fall back to stdlib json.loads."""
+    """Try json_repair first, fall back to stdlib json.loads with sanitisation."""
     raw = _strip_fences(raw)
     try:
         import json_repair  # type: ignore
-        return json_repair.loads(raw)
-    except ImportError:
+        result = json_repair.loads(raw)
+        # json_repair.loads can return a string if it cannot parse at all
+        if isinstance(result, dict):
+            return result
+    except Exception:
+        pass
+
+    # First attempt: direct parse (fast path)
+    try:
         return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Second attempt: sanitise bare control characters then retry
+    sanitised = _sanitise_control_chars(raw)
+    return json.loads(sanitised)
 
 
 def _summarise_history(error_history: list[dict]) -> str:
@@ -134,6 +197,13 @@ def generate_tool_json(user_prompt: str) -> dict:
         HumanMessage(content=user_prompt),
     ])
 
+    with open("response.txt" , "w" , encoding= 'utf-8') as file:
+        file.write('response :\n\n' + f'{response.content}' + '\n\n parsed_json\n\n' + f"{_parse_json(response.content)}")
+
+    # print(SystemMessage(content=system_prompt + _JSON_INSTRUCTION))
+    # print(HumanMessage(content=user_prompt))
+    # with open("example.txt", "w", encoding='utf-8') as file:
+    #     file.write(system_prompt + _JSON_INSTRUCTION + user_prompt )
     data = _parse_json(response.content)
     tool = ToolSchema.model_validate(data)
     return tool.model_dump()

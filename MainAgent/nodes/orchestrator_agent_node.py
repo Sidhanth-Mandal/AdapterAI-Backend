@@ -48,6 +48,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_groq import ChatGroq
+from langchain_anthropic import ChatAnthropic
 
 try:
     # groq >= 0.9  — BadRequestError is the 400 class we want to catch
@@ -69,7 +70,8 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # ---------------------------------------------------------------------------
 
 MAX_TOOL_ITERATIONS = 10
-_MODEL = "openai/gpt-oss-120b"    # switched from llama-3.3-70b-versatile
+#_MODEL = "openai/gpt-oss-120b"    # switched from llama-3.3-70b-versatile
+_MODEL = "claude-sonnet-4-6"
 
 # ---------------------------------------------------------------------------
 # Tool imports (lazy-style: imported at module level but grouped clearly)
@@ -104,6 +106,37 @@ def _safe_print(*args, **kwargs) -> None:
     safe = text.encode(enc, errors="replace").decode(enc)
     print(safe, flush=True, **kwargs)
 
+
+def _extract_text(content) -> str:
+    """
+    Safely extract a plain-text string from an LLM response's ``content``
+    field, which may be either:
+
+    * A plain ``str`` — returned as-is.
+    * A ``list`` of content-block dicts (Anthropic/Claude style), e.g.:
+        [
+            {"type": "text",     "text": "Thinking …"},
+            {"type": "tool_use", "id":   "…", …},
+        ]
+      In this case all ``text`` blocks are joined with newlines and
+      returned.  Non-text blocks (tool_use, image, etc.) are ignored.
+
+    Returns an empty string for ``None`` or unexpected types.
+    """
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+            if not isinstance(block, dict) or block.get("type") != "tool_use"
+        ]
+        return "\n".join(p for p in parts if p).strip()
+    # Fallback for any other type
+    return str(content)
+
 def _dbg_llm_response(iteration: int, response) -> None:
     """Print the raw LLM response for a given iteration."""
     _safe_print(f"\n{_DBG_SEP}")
@@ -111,7 +144,8 @@ def _dbg_llm_response(iteration: int, response) -> None:
     _safe_print(_DBG_THIN)
 
     if response.content:
-        preview = response.content[:500] + (" ..." if len(response.content) > 500 else "")
+        content_str = _extract_text(response.content)
+        preview = content_str[:500] + (" ..." if len(content_str) > 500 else "")
         _safe_print(f"  content : {preview}")
     else:
         _safe_print("  content : (empty — model is making tool calls)")
@@ -226,12 +260,16 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
     _safe_print(f"{'='*60}")
 
     # ── LLM setup ─────────────────────────────────────────────────────────────
-    llm = ChatGroq(
-        model=_MODEL,
-        temperature=0.0,
-        max_tokens=4096,
-        api_key=os.environ["GROQ_API_KEY"],
-    )
+    # llm = ChatGroq(
+    #     model=_MODEL,
+    #     temperature=0.0,
+    #     max_tokens=4096,
+    #     api_key=os.environ["GROQ_API_KEY"],
+    # )
+    llm = ChatAnthropic(model_name= _MODEL ,
+                        max_tokens=4096 ,
+                        api_key=os.environ["ANTHROPIC_API_KEY"])
+    
     llm_with_tools = llm.bind_tools(tools)
 
     # ── Config carries identity for tools that need it ────────────────────────
@@ -280,7 +318,7 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
             messages.append(error_hint)
             fallback = await llm.ainvoke(messages, config=runnable_config)
             messages.append(fallback)
-            final_response = fallback.content or ""
+            final_response = _extract_text(fallback.content)
             _dbg_final(final_response, "400 fallback to plain LLM")
             break
 
@@ -290,7 +328,7 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
 
         # No tool calls → final answer reached
         if not response.tool_calls:
-            final_response = response.content or ""
+            final_response = _extract_text(response.content)
             _dbg_final(final_response, "no more tool calls — done")
             break
 
@@ -334,7 +372,7 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
         )))
         forced = await llm.ainvoke(messages, config=runnable_config)
         messages.append(forced)
-        final_response = forced.content or ""
+        final_response = _extract_text(forced.content)
         _dbg_final(final_response, f"max iterations ({MAX_TOOL_ITERATIONS}) reached")
 
     _safe_print(f"\n[AGENT] Turn complete. tools_called={tools_called}")

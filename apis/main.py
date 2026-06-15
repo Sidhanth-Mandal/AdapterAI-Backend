@@ -7,25 +7,27 @@ Mounts all routers and configures global middleware.
 
 Endpoints
 ---------
-  POST /auth/token          — OAuth2 password-flow login
-  POST /auth/login          — JSON-body login
+  POST   /auth/token               — OAuth2 password-flow login
+  POST   /auth/login               — JSON-body login
 
-  POST /chat/               — MainAgent chat (auto-creates conversation if new)
-  POST /tempchat/           — TemplateCreation chat
+  POST   /chat/                    — MainAgent chat (auto-creates conversation if new)
+  POST   /tempchat/                — TemplateCreation chat
 
-  GET  /loadchathistory/    — Full message history for a conv_id
-  GET  /loadtemplate/       — All templates for the authenticated user
-  GET  /loadconv/           — All conv_id + title for the authenticated user
+  GET    /loadchathistory/         — Full message history for a conv_id
+  GET    /loadtemplate/            — All templates for the authenticated user
+  DELETE /loadtemplate/{id}        — Delete a template (DB only)
+  GET    /loadconv/                — All conv_id + title for the authenticated user
+  DELETE /loadconv/{conv_id}       — Delete a conversation (DB + Pinecone + Supabase)
 
 Running
 -------
 From the project root (AdapterAI/):
 
-    uvicorn apis.main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn apis.main:app --reload --host 0.0.0.0 --port 8002
 
 Interactive docs:
-    http://localhost:8000/docs   (Swagger UI)
-    http://localhost:8000/redoc  (ReDoc)
+    http://localhost:8002/docs   (Swagger UI)
+    http://localhost:8002/redoc  (ReDoc)
 """
 
 from __future__ import annotations

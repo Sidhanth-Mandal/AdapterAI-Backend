@@ -15,6 +15,7 @@ Tables accessed
   conversations   — conv_id, user_id, template_id, title
   messages        — chat history for a given conv_id
   templates       — templates owned by a user (for loadtemplate/)
+  attachments     — file attachments linked to a message (R2 storage)
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import psycopg2
 import psycopg2.extras
@@ -225,3 +226,130 @@ def fetch_templates_for_user(user_id: str) -> List[Dict]:
             cur.execute(sql, (user_id,))
             rows = cur.fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Attachment helpers
+# ---------------------------------------------------------------------------
+
+def create_attachment(
+    attachment_id: str,
+    message_id: str,
+    file_name: str,
+    mime_type: str,
+    storage_url: str,
+) -> None:
+    """
+    Insert a new row into the Attachments table.
+
+    Parameters
+    ----------
+    attachment_id : str
+        UUID generated during the R2 upload (also the R2 object key prefix).
+    message_id : str
+        The message this attachment is linked to (FK → Messages.message_id).
+    file_name : str
+        Original file name as supplied by the client.
+    mime_type : str
+        MIME type of the uploaded file.
+    storage_url : str
+        Full public URL to the object in R2.
+    """
+    sql = """
+        INSERT INTO attachments (attachment_id, message_id, file_name, mime_type, storage_url)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (attachment_id, message_id, file_name, mime_type, storage_url))
+
+
+def fetch_attachments_for_conversation(conv_id: str) -> List[Dict[str, Any]]:
+    """
+    Return every attachment linked to any message in ``conv_id``.
+
+    Each dict contains: attachment_id, file_name, storage_url.
+    Used before deleting a conversation so callers can remove the
+    corresponding files from Supabase Storage.
+    """
+    sql = """
+        SELECT a.attachment_id, a.file_name, a.storage_url
+        FROM   attachments a
+        JOIN   messages    m ON m.message_id = a.message_id
+        WHERE  m.conv_id = %s
+    """
+    with _get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (conv_id,))
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Delete helpers
+# ---------------------------------------------------------------------------
+
+def delete_conversation(conv_id: str, user_id: str) -> bool:
+    """
+    Hard-delete a conversation and all its dependent rows.
+
+    Deletion order respects FK constraints:
+      attachments → messages → conversations
+
+    Parameters
+    ----------
+    conv_id : str  — The conversation to delete.
+    user_id : str  — Owner guard: only deletes if the conversation belongs
+                     to this user.
+
+    Returns
+    -------
+    bool — True if a row was deleted, False if not found / not owned.
+    """
+    # Verify ownership first
+    check_sql = """
+        SELECT 1 FROM conversations
+        WHERE  conv_id = %s AND user_id = %s
+        LIMIT  1
+    """
+    delete_attachments_sql = """
+        DELETE FROM attachments
+        WHERE  message_id IN (
+            SELECT message_id FROM messages WHERE conv_id = %s
+        )
+    """
+    delete_messages_sql = "DELETE FROM messages     WHERE conv_id = %s"
+    delete_conv_sql     = "DELETE FROM conversations WHERE conv_id = %s AND user_id = %s"
+
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(check_sql, (conv_id, user_id))
+            if cur.fetchone() is None:
+                return False
+            cur.execute(delete_attachments_sql, (conv_id,))
+            cur.execute(delete_messages_sql,    (conv_id,))
+            cur.execute(delete_conv_sql,        (conv_id, user_id))
+    return True
+
+
+def delete_template(template_id: str, user_id: str) -> bool:
+    """
+    Hard-delete a template row.
+
+    Parameters
+    ----------
+    template_id : str  — The template to delete.
+    user_id     : str  — Owner guard: only deletes if ``created_by`` matches.
+
+    Returns
+    -------
+    bool — True if a row was deleted, False if not found / not owned.
+    """
+    sql = """
+        DELETE FROM templates
+        WHERE  template_id = %s AND created_by = %s
+    """
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (template_id, user_id))
+            return cur.rowcount > 0

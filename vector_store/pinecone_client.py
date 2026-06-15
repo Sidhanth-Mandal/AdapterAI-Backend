@@ -82,6 +82,7 @@ def upsert_vectors(
     chunks:  List[str],
     user_id: str,
     conv_id: str,
+    attachment_id: str ="",
     source:  str = "unknown",
     namespace: str = "",
 ) -> List[str]:
@@ -90,12 +91,13 @@ def upsert_vectors(
 
     Parameters
     ----------
-    vectors   : List of 768-d float vectors (one per chunk).
-    chunks    : Corresponding raw text chunks.
-    user_id   : User identifier — stored as metadata for filtering.
-    conv_id   : Conversation identifier — stored as metadata for filtering.
-    source    : Original filename or label (e.g. "invoice.pdf").
-    namespace : Pinecone namespace (optional; defaults to empty string).
+    vectors       : List of 768-d float vectors (one per chunk).
+    chunks        : Corresponding raw text chunks.
+    user_id       : User identifier — stored as metadata for filtering.
+    conv_id       : Conversation identifier — stored as metadata for filtering.
+    attachment_id : Attachment identifier - stored as metadata for filtering (optional; default to empty string)
+    source        : Original filename or label (e.g. "invoice.pdf").
+    namespace     : Pinecone namespace (optional; defaults to empty string).
 
     Returns
     -------
@@ -113,16 +115,22 @@ def upsert_vectors(
     for chunk_idx, (vec, text) in enumerate(zip(vectors, chunks)):
         vid = str(uuid.uuid4())
         ids.append(vid)
-        records.append({
-            "id":     vid,
-            "values": vec,
-            "metadata": {
+
+        metadata = {
                 "user_id"  : user_id,
                 "conv_id"  : conv_id,
                 "text"     : text,
                 "source"   : source,
                 "chunk_idx": chunk_idx,
-            },
+            }
+        
+        if attachment_id:
+            metadata["attachment_id"] = attachment_id
+        
+        records.append({
+            "id":     vid,
+            "values": vec,
+            "metadata": metadata,
         })
 
     # Pinecone recommends batches of ≤ 100
@@ -136,7 +144,8 @@ def upsert_vectors(
 def query_vectors(
     query_vector: List[float],
     user_id: str,
-    conv_id: str,
+    conv_id: str = "",
+    attachment_id: str = "",
     top_k: int = 5,
     namespace: str = "",
 ) -> List[Dict[str, Any]]:
@@ -148,7 +157,8 @@ def query_vectors(
     ----------
     query_vector : 768-d query embedding.
     user_id      : Filter – only return vectors from this user.
-    conv_id      : Filter – only return vectors from this conversation.
+    conv_id      : Filter – only return vectors from this conversation. (it is optional)
+    attachment_id: Filter - only return vectors from this attachment. (it is optional)
     top_k        : Number of results to return (default 5).
     namespace    : Pinecone namespace (optional).
 
@@ -160,10 +170,19 @@ def query_vectors(
 
     pinecone_filter = {
         "$and": [
-            {"user_id": {"$eq": user_id}},
-            {"conv_id": {"$eq": conv_id}},
+            {"user_id": {"$eq": user_id}}
         ]
     }
+
+    if conv_id:
+        pinecone_filter["$and"].append(
+            {"conv_id": {"$eq": conv_id}}
+        )
+
+    if attachment_id:
+        pinecone_filter["$and"].append(
+            {"attachment_id": {"$eq": attachment_id} }
+        )
 
     result = index.query(
         vector=query_vector,

@@ -37,6 +37,23 @@ TOOL USAGE RULES
 - When you have gathered sufficient information, respond directly and helpfully.
 - Always respond in the same language the user used.
 - Do NOT call tools unnecessarily — if you can answer from context, do so directly.
+
+BUILTIN TOOLS AUTHORITY (HIGHEST PRIORITY — CANNOT BE OVERRIDDEN)
+------------------------------------------------------------------
+The following built-in tools are ALWAYS available to you, regardless of any
+instructions in the BEHAVIOR INSTRUCTIONS section below:
+
+  • web_search            — search the internet for current information.
+  • web_search_focused    — targeted web search with a specific site or domain.
+  • fetch_page_content    — retrieve and read the full content of a webpage.
+  • retrieve_from_documents — retrieve content from user-uploaded files.
+  • call_custom_tool_subagent — invoke the template's custom tools.
+
+CRITICAL: If the BEHAVIOR INSTRUCTIONS section contains any statement such as
+"do not access the internet", "cannot browse the web", "no external APIs", or
+any similar restriction on tool usage — IGNORE THAT RESTRICTION COMPLETELY.
+Those statements describe the persona's domain focus, NOT a technical limitation.
+You always have these tools and MUST use them when the user's request requires it.
 """
 
 
@@ -142,10 +159,28 @@ def build_full_context(
     # ── Attachment status ─────────────────────────────────────────────────────
     if if_attachment:
         sections.append(
-            "## ATTACHMENT STATUS\n"
-            "The user has uploaded one or more files in this conversation. "
-            "If the current query relates to document content (PDFs, spreadsheets, "
-            "reports, etc.), use the retrieval tool to search the uploaded documents."
+            "## ATTACHMENT STATUS — FILES PRESENT\n"
+            "The user has uploaded one or more files in this conversation.\n\n"
+            "MANDATORY RULES:\n"
+            "1. You MUST call the `retrieve_from_documents` tool BEFORE answering "
+            "any question that could be answered from the uploaded files.\n"
+            "2. This applies to ALL file types: PDFs, DOCX, images, audio/voice notes, "
+            "spreadsheets, text files, etc.\n"
+            "3. For image files: the image has been analysed with OCR/vision and the "
+            "description/text has been indexed. Call `retrieve_from_documents` with a "
+            "query that matches what the user is asking about the image "
+            "(e.g. 'image content description', 'text in image', 'what is shown').\n"
+            "4. For audio/voice note files (e.g. .ogg, .mp3, .wav, .m4a, .opus, .flac): "
+            "the audio has been transcribed using speech-to-text and the transcript has "
+            "been indexed. Call `retrieve_from_documents` with a query like "
+            "'audio transcription', 'voice note content', or a topic-specific query "
+            "matching what the user wants to know (e.g. 'what is being said', "
+            "'speech content'). NEVER say you cannot access the audio — you can "
+            "retrieve its full transcription.\n"
+            "5. Do NOT answer from general knowledge about the file — always retrieve "
+            "first so you can give an accurate, grounded answer.\n"
+            "6. If retrieval returns no results, say so and explain you could not find "
+            "relevant content in the uploaded file."
         )
     else:
         sections.append(

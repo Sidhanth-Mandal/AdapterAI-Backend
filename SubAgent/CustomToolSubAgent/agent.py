@@ -1,11 +1,11 @@
 """
-SubAgent/CustomToolSubAgent/agent.py — Groq-powered tool-calling subagent.
+SubAgent/CustomToolSubAgent/agent.py — LangChain ChatGroq-powered tool-calling subagent.
 
 This module implements a ReAct-style agentic loop that:
   1. Receives a task (query) and a configurable dict containing conv_id.
   2. Looks up the conversation's template_id from the Conversations table.
   3. Fetches the tool_json schema from the Tools table using that template_id.
-  4. Uses a Groq LLM to reason over the available functions and decide which
+  4. Uses a ChatGroq LLM to reason over the available functions and decide which
      to call, with what arguments, in what order (and potentially in parallel).
   5. Sends those calls to the Docker executor via execution_call().
   6. Feeds results back into the conversation history.
@@ -48,29 +48,25 @@ if str(_PROJECT_ROOT) not in sys.path:
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ---------------------------------------------------------------------------
-# Groq client
+# LangChain ChatGroq client
 # ---------------------------------------------------------------------------
 
-try:
-    from groq import Groq
-except ImportError as exc:
-    raise ImportError(
-        "groq is not installed. Run: pip install groq"
-    ) from exc
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_groq import ChatGroq
 
-_GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not _GROQ_API_KEY:
-    raise EnvironmentError(
-        "GROQ_API_KEY is not set. Add it to your .env file or export it."
-    )
-
-_groq_client = Groq(api_key=_GROQ_API_KEY)
-
-# Model to use — must match the MainAgent model
+# Model to use for the subagent
 _MODEL = "openai/gpt-oss-120b"
 
 # Maximum agentic iterations to prevent infinite loops
 _MAX_ITERATIONS = 6
+
+# Module-level ChatGroq instance (reused across calls; thread-safe for invoke())
+_llm = ChatGroq(
+    model=_MODEL,
+    temperature=0.0,
+    max_tokens=4096,
+    api_key=os.environ["GROQ_API_KEY"],
+)
 
 # ---------------------------------------------------------------------------
 # Executor + DB imports
@@ -145,7 +141,7 @@ def run_custom_tool_subagent(
     max_iterations: int = _MAX_ITERATIONS,
 ) -> str:
     """
-    Run the Groq-powered tool-calling subagent loop.
+    Run the ChatGroq-powered tool-calling subagent loop.
 
     The tool JSON schema is fetched automatically from PostgreSQL using the
     conv_id found in `configurable`:
@@ -193,34 +189,30 @@ def run_custom_tool_subagent(
     schema_summary = _summarise_schema(tool_json)
     system_prompt  = _SYSTEM_PROMPT.format(tool_schema=schema_summary)
 
-    # ── Initialise conversation history ───────────────────────────────────────
-    history: list[dict] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": _TASK_MESSAGE.format(query=query)},
+    # ── Initialise conversation history as LangChain messages ─────────────────
+    history: list[BaseMessage] = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=_TASK_MESSAGE.format(query=query)),
     ]
 
     # ── Agentic loop ──────────────────────────────────────────────────────────
     for iteration in range(1, max_iterations + 1):
-        # Call Groq LLM
-        response       = _chat(history)
-        assistant_text = response.strip()
+        # Call ChatGroq
+        assistant_text = _chat(history)
 
         # Append assistant turn to history
-        history.append({"role": "assistant", "content": assistant_text})
+        history.append(AIMessage(content=assistant_text))
 
         # Parse JSON action
         action_obj = _parse_action(assistant_text)
 
         if action_obj is None:
             # Unparseable — prompt LLM to correct itself
-            history.append({
-                "role": "user",
-                "content": (
-                    "ERROR: Your last response was not valid JSON. "
-                    "Please respond with a valid JSON object using the "
-                    '"call_functions" or "final_answer" action.'
-                ),
-            })
+            history.append(HumanMessage(content=(
+                "ERROR: Your last response was not valid JSON. "
+                "Please respond with a valid JSON object using the "
+                '"call_functions" or "final_answer" action.'
+            )))
             continue
 
         action = action_obj.get("action", "")
@@ -233,10 +225,9 @@ def run_custom_tool_subagent(
         if action == "call_functions":
             calls: dict = action_obj.get("calls", {})
             if not calls:
-                history.append({
-                    "role": "user",
-                    "content": 'ERROR: "calls" was empty. Provide at least one function call.',
-                })
+                history.append(HumanMessage(content=(
+                    'ERROR: "calls" was empty. Provide at least one function call.'
+                )))
                 continue
 
             # Execute via Docker executor
@@ -244,35 +235,26 @@ def run_custom_tool_subagent(
 
             # Feed result back as a user (tool-observation) message
             observation = json.dumps(execution_result, indent=2, ensure_ascii=False)
-            history.append({
-                "role": "user",
-                "content": (
-                    f"TOOL RESULTS (iteration {iteration}):\n"
-                    f"```json\n{observation}\n```\n\n"
-                    "Now review the results and either call more functions if "
-                    "needed, or provide your final answer."
-                ),
-            })
+            history.append(HumanMessage(content=(
+                f"TOOL RESULTS (iteration {iteration}):\n"
+                f"```json\n{observation}\n```\n\n"
+                "Now review the results and either call more functions if "
+                "needed, or provide your final answer."
+            )))
             continue
 
         # Unknown action
-        history.append({
-            "role": "user",
-            "content": (
-                f'ERROR: Unknown action "{action}". '
-                'Use "call_functions" or "final_answer".'
-            ),
-        })
+        history.append(HumanMessage(content=(
+            f'ERROR: Unknown action "{action}". '
+            'Use "call_functions" or "final_answer".'
+        )))
 
     # ── Force a final answer after max iterations ─────────────────────────────
-    history.append({
-        "role": "user",
-        "content": (
-            "You have reached the maximum number of iterations. "
-            "Based on everything gathered so far, respond with a "
-            '"final_answer" JSON object containing your best synthesised answer.'
-        ),
-    })
+    history.append(HumanMessage(content=(
+        "You have reached the maximum number of iterations. "
+        "Based on everything gathered so far, respond with a "
+        '"final_answer" JSON object containing your best synthesised answer.'
+    )))
     response   = _chat(history)
     action_obj = _parse_action(response.strip())
     if action_obj and action_obj.get("action") == "final_answer":
@@ -286,15 +268,13 @@ def run_custom_tool_subagent(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _chat(history: list[dict]) -> str:
-    """Send messages to Groq and return the assistant content string."""
-    completion = _groq_client.chat.completions.create(
-        model=_MODEL,
-        messages=history,
-        temperature=0.0,
-        max_tokens=4096,
-    )
-    return completion.choices[0].message.content or ""
+def _chat(history: list[BaseMessage]) -> str:
+    """
+    Invoke ChatGroq with the current message history and return the assistant
+    content string.
+    """
+    response = _llm.invoke(history)
+    return response.content or ""
 
 
 def _parse_action(text: str) -> dict | None:

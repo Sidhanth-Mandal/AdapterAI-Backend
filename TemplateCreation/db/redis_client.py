@@ -68,8 +68,11 @@ def get_conversation_cache(template_id: str) -> Optional[List[Dict]]:
     client = _get_client()
     raw = client.get(_key(template_id))
     if raw is None:
+        print(f"[TC:redis]   get_conversation_cache | key={_key(template_id)!r} → MISS")
         return None
-    return json.loads(raw)
+    parsed = json.loads(raw)
+    print(f"[TC:redis]   get_conversation_cache | key={_key(template_id)!r} → HIT ({len(parsed)} message(s))")
+    return parsed
 
 
 def set_conversation_cache(template_id: str, messages: List[Dict]) -> None:
@@ -80,6 +83,7 @@ def set_conversation_cache(template_id: str, messages: List[Dict]) -> None:
     """
     client = _get_client()
     client.setex(_key(template_id), _TTL_SECONDS, json.dumps(messages, default=str))
+    print(f"[TC:redis]   set_conversation_cache | key={_key(template_id)!r} | {len(messages)} message(s) | TTL={_TTL_SECONDS}s")
 
 
 def append_to_conversation_cache(
@@ -97,9 +101,11 @@ def append_to_conversation_cache(
     existing: List[Dict] = json.loads(raw) if raw else []
     existing.extend(new_messages)
     client.setex(_key(template_id), _TTL_SECONDS, json.dumps(existing, default=str))
+    print(f"[TC:redis]   append_to_conversation_cache | key={_key(template_id)!r} | appended {len(new_messages)} message(s) | total now: {len(existing)}")
 
 
 def invalidate_conversation_cache(template_id: str) -> None:
     """Delete the cache entry for ``template_id``."""
     client = _get_client()
     client.delete(_key(template_id))
+    print(f"[TC:redis]   invalidate_conversation_cache | key={_key(template_id)!r} deleted")

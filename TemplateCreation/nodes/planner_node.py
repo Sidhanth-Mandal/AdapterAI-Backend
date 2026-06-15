@@ -122,34 +122,43 @@ def planner_node(state: GraphState) -> dict:
     llm = _build_llm()
 
     planner_message = _build_planner_message(state)
+    print(f"[TC:planner] ► planner_node fired | conversation messages: {len(state['messages'])}")
+    print(f"[TC:planner]   planner input transcript length: {len(planner_message)} chars")
 
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=planner_message),
     ]
 
+    print(f"[TC:planner]   invoking Groq LLM (Phase 2 planner) …")
     response    = llm.invoke(messages)
     raw_output  = response.content
+    print(f"[TC:planner]   LLM responded | raw output length: {len(raw_output)} chars")
 
     # -----------------------------------------------------------------------
     # Extract the two delimited sections
     # -----------------------------------------------------------------------
     tool_creation_prompt, system_prompt = extract_planner_outputs(raw_output)
+    print(f"[TC:planner]   tool_creation_prompt extracted: {len(tool_creation_prompt)} chars {'(OK)' if tool_creation_prompt else '(EMPTY — parse may have failed)'}")
+    print(f"[TC:planner]   system_prompt extracted:        {len(system_prompt)} chars {'(OK)' if system_prompt else '(EMPTY — parse may have failed)'}")
 
     # -----------------------------------------------------------------------
     # Fallback: if parsing fails, store the raw output for inspection
     # -----------------------------------------------------------------------
     if not tool_creation_prompt:
+        print("[TC:planner]   ⚠ WARNING: tool_creation_prompt parse FAILED — storing raw output as fallback")
         tool_creation_prompt = (
             "[PARSE ERROR] Could not extract Tool Creation Prompt.\n\n"
             "Raw planner output:\n" + raw_output
         )
     if not system_prompt:
+        print("[TC:planner]   ⚠ WARNING: system_prompt parse FAILED — storing raw output as fallback")
         system_prompt = (
             "[PARSE ERROR] Could not extract System Prompt.\n\n"
             "Raw planner output:\n" + raw_output
         )
 
+    print(f"[TC:planner] ◄ planner_node returning | phase='done'")
     return {
         "tool_creation_prompt": tool_creation_prompt,
         "system_prompt":        system_prompt,

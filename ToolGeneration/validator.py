@@ -3,28 +3,25 @@ validator.py — Multi-stage code validator for AI-generated tool schemas.
 
 Stages
 ------
-1. Schema Integrity    — field presence, identifier validity, type string legality
-2. Syntax Check        — ast.parse() the code field
-3. Static Safety       — AST walk for dangerous builtins / system calls / secrets
-4. Structural Match    — declared functions ↔ actual def statements + param names
-5. Dependency Check    — importlib.util.find_spec() for every listed dependency
-6. Sandboxed Dry-run   — execute in restricted namespace with mocked network calls
+1. Schema Integrity   — field presence, identifier validity, type string legality
+2. Syntax Check       — ast.parse() the code field
+3. Static Safety      — AST walk for dangerous builtins / system calls / secrets
+4. Structural Match   — declared functions <-> actual def statements + param names
+5. Dependency Check   — importlib.util.find_spec() for every listed dependency
+
+Note: runtime execution / sandboxed dry-run is handled by the separate executor.
 """
 
 from __future__ import annotations
 
 import ast
-import importlib.util
-import inspect
 import json
-import re
-import textwrap
-import traceback
 import keyword
+import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -36,6 +33,7 @@ class StageResult:
     passed: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    is_safe: bool = True  # FIX #4: proper declared field instead of dynamic _safe attribute
 
     def add_error(self, msg: str) -> None:
         self.errors.append(msg)
@@ -52,26 +50,26 @@ class ValidationReport:
     stages: list[StageResult]
     errors: list[str]
     warnings: list[str]
-    functions_verified: list[str]
 
     def summary(self) -> str:
         lines = [
             "=" * 60,
-            f"  VALIDATION {'PASSED ✓' if self.passed else 'FAILED ✗'}",
-            f"  SAFE:      {'YES' if self.safe else 'NO — dangerous patterns found'}",
+            f"  VALIDATION {'PASSED [OK]' if self.passed else 'FAILED [!!]'}",
+            f"  SAFE:      {'YES' if self.safe else 'NO -- dangerous patterns found'}",
             "=" * 60,
         ]
         for s in self.stages:
-            icon = "✓" if s.passed else "✗"
+            icon = "+" if s.passed else "-"
             lines.append(f"  [{icon}] {s.name}")
             for e in s.errors:
                 lines.append(f"        ERROR   : {e}")
             for w in s.warnings:
                 lines.append(f"        WARNING : {w}")
-        if self.functions_verified:
-            lines.append(f"\n  Functions verified: {', '.join(self.functions_verified)}")
         lines.append("=" * 60)
         return "\n".join(lines)
+
+    def __str__(self) -> str:
+        return self.summary()
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +83,13 @@ _VALID_TYPES = {
     "List", "Dict", "Tuple", "Set",  # typing-style capitalised
 }
 
+# S2: valid return types for schema validation
+_VALID_RETURN_TYPES = {
+    "str", "int", "float", "bool", "list", "dict", "tuple", "set",
+    "bytes", "Any", "None",
+    "List", "Dict", "Tuple", "Set",
+}
+
 # Patterns that indicate a dangerous construct
 _DANGEROUS_CALLS = {
     # builtins
@@ -92,7 +97,7 @@ _DANGEROUS_CALLS = {
     # os
     "os.system", "os.popen", "os.execv", "os.execve", "os.execvp",
     "os.remove", "os.unlink", "os.rmdir",
-    # shutil
+    # shutil — also caught by blocking in sandbox but listed here for static check
     "shutil.rmtree", "shutil.move",
     # subprocess
     "subprocess.run", "subprocess.call", "subprocess.Popen",
@@ -101,10 +106,12 @@ _DANGEROUS_CALLS = {
     "importlib.import_module",
     # ctypes
     "ctypes.cdll", "ctypes.windll",
+    # sys — FIX #6: added to match sandbox blocking for consistency
+    "sys.exit", "sys.modules",
 }
 
 _SECRET_PATTERNS = [
-    re.compile(r'(?i)(api[_-]?key|apikey|secret|token|password|passwd|auth)\s*=\s*["\'][^"\']{6,}["\']'),
+    re.compile(r'(?i)(api[_-]?key|apikey|secret|token|password|passwd|auth)\s*=\s*["\'][^"\'"]{6,}["\']'),
     re.compile(r'(?i)Bearer\s+[A-Za-z0-9\-._~+/]{20,}'),
 ]
 
@@ -116,21 +123,32 @@ def _is_valid_identifier(name: str) -> bool:
 
 
 def _stub_value(type_str: str) -> Any:
-    """Return a safe stub value for a given type string."""
+    """Return a safe stub value for a given type string.
+
+    S6: handles complex generic types like List[str], Optional[int], Dict[str, Any]
+    by stripping the bracket suffix and resolving the base type.
+    """
+    base = type_str.split("[")[0].strip()   # "List[str]" → "List", "Optional[int]" → "Optional"
     mapping = {
         "str": "test_value",
         "int": 1,
         "float": 1.0,
         "bool": True,
         "list": [],
+        "List": [],
         "dict": {},
+        "Dict": {},
         "tuple": (),
+        "Tuple": (),
         "set": set(),
+        "Set": set(),
         "bytes": b"",
         "Any": "stub",
         "None": None,
+        "Optional": None,   # safest default for Optional[X] — avoids type errors
+        "Union": "stub",
     }
-    return mapping.get(type_str, "stub")
+    return mapping.get(base, mapping.get(type_str, "stub"))
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +180,11 @@ def _stage_schema_integrity(tool: dict) -> StageResult:
 
         if not fn.get("description"):
             result.add_warning(f"Function '{fn_label}' has no description")
+
+        # S2: validate return_type is a known type
+        rt = fn.get("return_type", "")
+        if rt and rt.split("[")[0].strip() not in _VALID_RETURN_TYPES:
+            result.add_warning(f"Function '{fn_label}' has unusual return_type: '{rt}'")
 
         for j, param in enumerate(fn.get("parameters", [])):
             p_label = param.get("name", f"<param[{j}]>")
@@ -248,17 +271,24 @@ def _stage_static_safety(code: str) -> StageResult:
             if node.module in {"subprocess", "ctypes", "pty"}:
                 result.add_error(f"Dangerous import from: '{node.module}'")
                 safe = False
+            # S3: wildcard import detection
+            for alias in node.names:
+                if alias.name == "*":
+                    result.add_warning(
+                        f"Wildcard import 'from {node.module} import *' detected — "
+                        "avoid namespace pollution"
+                    )
 
     # --- Check for hardcoded secrets via regex ---
     for pattern in _SECRET_PATTERNS:
         matches = pattern.findall(code)
         if matches:
-            result.add_error(f"Possible hardcoded secret/token detected — do not embed credentials in code")
+            result.add_error("Possible hardcoded secret/token detected — do not embed credentials in code")
             safe = False
             break
 
-    # Record safety flag in a custom attribute for the caller
-    result._safe = safe
+    # FIX #4: use proper declared field instead of dynamic attribute
+    result.is_safe = safe
     return result
 
 
@@ -281,11 +311,15 @@ def _stage_structural_match(tool: dict, code: str) -> StageResult:
         result.add_error("Cannot perform structural match — code has syntax errors")
         return result
 
-    # Collect all top-level def names from code
-    defined_functions: dict[str, ast.FunctionDef] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            defined_functions[node.name] = node
+    # FIX #3 / S1: use iter_child_nodes instead of ast.walk to only collect
+    # TOP-LEVEL module-scope function definitions. ast.walk previously descended
+    # into all nested scopes (closures, decorators, inner functions) causing
+    # false-positive warnings for helper closures like 'decorator' and 'wrapper'.
+    defined_functions: dict[str, ast.FunctionDef] = {
+        node.name: node
+        for node in ast.iter_child_nodes(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
 
     declared_names = [fn["name"] for fn in tool.get("functions", []) if fn.get("name")]
 
@@ -307,7 +341,7 @@ def _stage_structural_match(tool: dict, code: str) -> StageResult:
                     f"Function '{fn_name}': schema param '{sp}' not found in code signature {code_params}"
                 )
 
-    # Warn about functions defined in code but not declared in schema
+    # Warn about public functions defined at module scope but not declared in schema
     for def_name in defined_functions:
         if def_name not in declared_names and not def_name.startswith("_"):
             result.add_warning(f"Function '{def_name}' is defined in code but not declared in schema")
@@ -315,194 +349,139 @@ def _stage_structural_match(tool: dict, code: str) -> StageResult:
     return result
 
 
-def _stage_dependency_check(tool: dict) -> StageResult:
-    result = StageResult(name="Dependency Check", passed=True)
-    deps = tool.get("dependencies", [])
+def _stage_dependency_check(tool: dict, code: str) -> StageResult:
+    """
+    Scan the code for third-party imports and ensure every one is listed
+    in the tool schema's 'dependencies' field.
 
-    if not deps:
-        result.add_warning("No dependencies listed — verify imports in code are available")
+    Behaviour
+    ---------
+    - Stdlib modules are silently ignored.
+    - Non-stdlib modules already listed in 'dependencies' pass fine.
+    - Non-stdlib modules NOT listed but considered safe are auto-added to
+      ``tool['dependencies']`` and reported as a warning.
+    - Modules in _HARMFUL_MODULES (should already be caught by Stage 3)
+      are flagged as errors and are NOT auto-added.
+
+    Note: this stage does NOT check whether packages are installed on the
+    current system — that is the executor's responsibility.
+    """
+    result = StageResult(name="Dependency Check", passed=True)
+
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        result.add_error("Cannot check dependencies — code has syntax errors")
         return result
 
-    missing = []
-    for dep in deps:
-        # Normalise: pip name may differ from import name (e.g., beautifulsoup4 → bs4)
-        import_name = _pip_to_import_name(dep)
-        spec = importlib.util.find_spec(import_name)
-        if spec is None:
-            missing.append(dep)
-            result.add_warning(f"Dependency '{dep}' is NOT installed (import name tried: '{import_name}')")
+    # Python 3.10+ provides a complete stdlib set; fall back to a curated list
+    stdlib_mods: frozenset[str] = getattr(sys, "stdlib_module_names", _STDLIB_FALLBACK)
 
-    if missing:
-        result.add_error(
-            f"Missing dependencies: {missing} — run: pip install {' '.join(missing)}"
+    # Collect every top-level module name that appears in an import statement
+    imported_tops: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top:
+                    imported_tops.add(top)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top:
+                imported_tops.add(top)
+
+    # Only care about third-party modules
+    third_party = {m for m in imported_tops if m not in stdlib_mods}
+
+    # Build the set of import-names already covered by declared dependencies
+    declared_deps: list[str] = tool.setdefault("dependencies", [])
+    declared_import_names: set[str] = {_pip_to_import_name(d) for d in declared_deps}
+
+    auto_added: list[str] = []
+
+    for mod in sorted(third_party):
+        if mod in declared_import_names:
+            continue  # already covered
+
+        if mod in _HARMFUL_MODULES:
+            result.add_error(
+                f"Module '{mod}' is imported but is a restricted/harmful module — "
+                "remove this import (it should have been caught by Stage 3)"
+            )
+            continue
+
+        # Safe: auto-add to schema dependencies
+        pip_name = _import_to_pip_name(mod)
+        declared_deps.append(pip_name)
+        declared_import_names.add(mod)
+        auto_added.append(pip_name)
+
+    if auto_added:
+        result.add_warning(
+            f"Auto-added undeclared dependencies to schema: {auto_added}"
         )
 
     return result
 
 
+# ---------------------------------------------------------------------------
+# Pip <-> import name translation tables
+# ---------------------------------------------------------------------------
+
+# Modules that should never be auto-added (harmful; Stage 3 should have caught them)
+_HARMFUL_MODULES = {"subprocess", "ctypes", "pty", "socket"}
+
+# pip install name  →  import name
+_PIP_TO_IMPORT: dict[str, str] = {
+    "beautifulsoup4":     "bs4",
+    "scikit-learn":       "sklearn",
+    "pillow":             "PIL",
+    "pyyaml":             "yaml",
+    "python-dateutil":    "dateutil",
+    "google-generativeai": "google",
+    "langchain-groq":     "langchain_groq",
+    "langchain-core":     "langchain_core",
+    "json-repair":        "json_repair",
+    "opencv-python":      "cv2",
+    "setuptools":         "pkg_resources",
+}
+
+# import name  →  pip install name  (reverse of above)
+_IMPORT_TO_PIP: dict[str, str] = {v: k for k, v in _PIP_TO_IMPORT.items()}
+
+# Large but common stdlib fallback for Python < 3.10
+_STDLIB_FALLBACK: frozenset[str] = frozenset({
+    "abc", "ast", "asyncio", "base64", "binascii", "builtins", "cmath",
+    "collections", "concurrent", "contextlib", "copy", "csv", "dataclasses",
+    "datetime", "decimal", "email", "enum", "fnmatch", "fractions",
+    "ftplib", "functools", "gc", "getpass", "glob", "gzip", "hashlib",
+    "heapq", "hmac", "html", "http", "idlelib", "importlib", "inspect",
+    "io", "ipaddress", "itertools", "json", "keyword", "linecache",
+    "logging", "lzma", "math", "mimetypes", "multiprocessing", "operator",
+    "os", "pathlib", "pickle", "pkgutil", "platform", "pprint", "queue",
+    "random", "re", "secrets", "select", "shelve", "shutil", "signal",
+    "smtplib", "socket", "sqlite3", "stat", "statistics", "string",
+    "struct", "subprocess", "sys", "sysconfig", "tarfile", "tempfile",
+    "textwrap", "threading", "time", "timeit", "token", "tokenize",
+    "tomllib", "traceback", "types", "typing", "unicodedata", "unittest",
+    "urllib", "uuid", "warnings", "weakref", "xml", "zipfile", "zlib",
+})
+
+
 def _pip_to_import_name(pip_name: str) -> str:
-    """Map common pip package names to their actual import names."""
-    _MAP = {
-        "beautifulsoup4": "bs4",
-        "scikit-learn": "sklearn",
-        "pillow": "PIL",
-        "pyyaml": "yaml",
-        "python-dateutil": "dateutil",
-        "google-generativeai": "google.generativeai",
-        "langchain-groq": "langchain_groq",
-        "langchain-core": "langchain_core",
-        "json-repair": "json_repair",
-    }
-    return _MAP.get(pip_name.lower(), pip_name.replace("-", "_"))
+    """Map a pip package name to the top-level import name used in code."""
+    return _PIP_TO_IMPORT.get(pip_name.lower(), pip_name.replace("-", "_"))
 
 
-_BLOCKED_MODULES = {"subprocess", "ctypes", "pty", "socket", "os", "shutil", "sys"}
-
-def _safe_import(name: str, *args, **kwargs) -> Any:
-    """Wrapped __import__ that blocks dangerous modules in the sandbox."""
-    top_module = name.split(".")[0]
-    if top_module in _BLOCKED_MODULES:
-        raise ImportError(
-            f"[Sandbox] Import of '{name}' is blocked during dry-run validation"
-        )
-    return __import__(name, *args, **kwargs)
-
-
-def _stage_dry_run(tool: dict, code: str) -> StageResult:
-    result = StageResult(name="Sandboxed Dry-run", passed=True)
-    verified: list[str] = []
-
-    try:
-        tree = ast.parse(code)
-    except Exception:
-        result.add_error("Cannot dry-run — code has syntax errors")
-        return result, verified
-
-    # Build a restricted builtins dict:
-    # - Keep __import__ but replace it with our safe wrapper
-    # - Remove only the truly abusable builtins
-    _STRIP_BUILTINS = {"exec", "eval", "compile", "open", "input", "breakpoint"}
-
-    raw_builtins = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-    safe_builtins: dict[str, Any] = {
-        k: v for k, v in raw_builtins.items() if k not in _STRIP_BUILTINS
-    }
-    # Swap in the sandboxed importer
-    safe_builtins["__import__"] = _safe_import
-
-    namespace: dict[str, Any] = {"__builtins__": safe_builtins}
-
-    # Mock network libraries so we never make real HTTP calls
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "{}"
-    mock_response.json.return_value = {}
-    mock_response.content = b"{}"
-
-    network_patches = [
-        "requests.get", "requests.post", "requests.put", "requests.delete",
-        "requests.Session.get", "requests.Session.post",
-    ]
-
-    patchers = []
-    for target in network_patches:
-        try:
-            p = patch(target, return_value=mock_response)
-            p.start()
-            patchers.append(p)
-        except Exception:
-            pass
-
-    try:
-        # Execute the code so functions are defined in namespace
-        exec(compile(tree, "<generated_tool>", "exec"), namespace)  # noqa: S102
-
-        # Call each declared function — use example values when available, else stubs
-        for fn_schema in tool.get("functions", []):
-            fn_name = fn_schema.get("name")
-            if not fn_name or fn_name not in namespace:
-                continue
-
-            fn_callable = namespace[fn_name]
-            call_kwargs: dict[str, Any] = {}
-            used_examples: list[str] = []
-            for param in fn_schema.get("parameters", []):
-                example_val = param.get("example")  # None if not provided
-                if example_val is not None:
-                    call_kwargs[param["name"]] = example_val
-                    used_examples.append(param["name"])
-                else:
-                    call_kwargs[param["name"]] = _stub_value(param.get("type", "str"))
-
-            try:
-                input_source = f"examples ({used_examples})" if used_examples else "stubs"
-                ret = fn_callable(**call_kwargs)
-
-                # Verify return type
-                expected_rt = fn_schema.get("return_type", "dict")
-                if expected_rt == "dict" and not isinstance(ret, dict):
-                    result.add_warning(
-                        f"Function '{fn_name}' declared return_type='dict' but returned {type(ret).__name__}"
-                    )
-                elif expected_rt == "list" and not isinstance(ret, list):
-                    result.add_warning(
-                        f"Function '{fn_name}' declared return_type='list' but returned {type(ret).__name__}"
-                    )
-
-                # Verify output keys presence
-                if isinstance(ret, dict):
-                    declared_outputs = {o["name"]: o for o in fn_schema.get("outputs", [])}
-                    missing_keys = set(declared_outputs) - set(ret.keys())
-                    if missing_keys:
-                        result.add_warning(
-                            f"Function '{fn_name}' [{input_source}] return dict missing declared keys: {missing_keys}"
-                        )
-
-                    # If output.example is provided, verify actual value type matches example type
-                    for out_name, out_schema in declared_outputs.items():
-                        out_example = out_schema.get("example")
-                        if out_example is not None and out_name in ret:
-                            expected_type = type(out_example)
-                            actual_val = ret[out_name]
-                            if not isinstance(actual_val, expected_type):
-                                result.add_warning(
-                                    f"Function '{fn_name}' output '{out_name}': "
-                                    f"expected {expected_type.__name__} (from example) "
-                                    f"but got {type(actual_val).__name__}"
-                                )
-
-                verified.append(fn_name)
-
-            except (KeyError, TypeError, AttributeError, IndexError) as e:
-                # These commonly occur because the mocked API response returns {}
-                # instead of the real structure — treat as a warning, not a hard error.
-                result.add_warning(
-                    f"Function '{fn_name}' raised {type(e).__name__} during dry-run "
-                    f"(likely due to mocked network response returning empty data): {e}"
-                )
-                # Still count as partially verified — the function ran
-                verified.append(fn_name)
-
-            except Exception as e:
-                tb = traceback.format_exc(limit=3)
-                result.add_error(f"Function '{fn_name}' raised during dry-run: {type(e).__name__}: {e}\n{textwrap.indent(tb, '    ')}")
-
-    except Exception as e:
-        tb = traceback.format_exc(limit=3)
-        result.add_error(f"Code execution failed during dry-run: {type(e).__name__}: {e}\n{textwrap.indent(tb, '    ')}")
-    finally:
-        for p in patchers:
-            try:
-                p.stop()
-            except Exception:
-                pass
-
-    return result, verified
+def _import_to_pip_name(import_name: str) -> str:
+    """Map a top-level import name back to the pip package name."""
+    return _IMPORT_TO_PIP.get(import_name, import_name)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
     """
@@ -517,6 +496,12 @@ def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
     -------
     ValidationReport
         Full report with per-stage results, errors, warnings, and safety flag.
+        str(report) or print(report) outputs the human-readable summary.
+
+    Note
+    ----
+    Runtime execution is intentionally not performed here.
+    Use the executor module for sandboxed execution and function-level testing.
     """
     # --- Load input ---
     if isinstance(tool_input, (str, Path)):
@@ -536,7 +521,6 @@ def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
     all_errors: list[str] = []
     all_warnings: list[str] = []
     safe = True
-    functions_verified: list[str] = []
 
     # Stage 1 — Schema Integrity
     s1 = _stage_schema_integrity(tool)
@@ -548,7 +532,7 @@ def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
 
     # Stage 3 — Static Safety
     s3 = _stage_static_safety(code)
-    safe = getattr(s3, "_safe", True)
+    safe = s3.is_safe
     stages.append(s3)
 
     # Stage 4 — Structural Match
@@ -556,16 +540,8 @@ def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
     stages.append(s4)
 
     # Stage 5 — Dependency Check
-    s5 = _stage_dependency_check(tool)
+    s5 = _stage_dependency_check(tool, code)
     stages.append(s5)
-
-    # Stage 6 — Dry-run (only if syntax passes)
-    if s2.passed:
-        s6, functions_verified = _stage_dry_run(tool, code)
-    else:
-        s6 = StageResult(name="Sandboxed Dry-run", passed=False)
-        s6.add_error("Skipped — code has syntax errors")
-    stages.append(s6)
 
     # --- Aggregate ---
     for s in stages:
@@ -580,5 +556,4 @@ def validate_tool(tool_input: dict | str | Path) -> ValidationReport:
         stages=stages,
         errors=all_errors,
         warnings=all_warnings,
-        functions_verified=functions_verified,
     )

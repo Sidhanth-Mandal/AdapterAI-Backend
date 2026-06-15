@@ -56,7 +56,7 @@ def fetch_template(template_id: str) -> dict | None:
             template_id,
             name,
             description,
-            system_prompt,
+            behaviour_prompt,
             tool_generation_prompt,
             tool_information,
             created_by,

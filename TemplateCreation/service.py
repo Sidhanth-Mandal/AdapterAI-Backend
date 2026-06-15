@@ -289,7 +289,11 @@ def chat_template(
     #    the same template_id hits this check and returns early — the
     #    graph is never invoked and no messages are persisted.
     # -------------------------------------------------------------------
+    print(f"[TC:service] ► chat_template called | template_id={template_id!r} user_id={user_id!r}")
+    print(f"[TC:service]   user_prompt preview: {user_prompt[:80]!r}{'...' if len(user_prompt) > 80 else ''}")
+
     if is_template_finalized(template_id):
+        print(f"[TC:service] ✗ Template '{template_id}' is already finalised — rejecting turn.")
         return (
             "This template has already been created and is no longer "
             "available for editing."
@@ -299,17 +303,21 @@ def chat_template(
     # 1. Load existing conversation history (Redis → Postgres fallback)
     # -------------------------------------------------------------------
     history = _load_history(template_id)
+    print(f"[TC:service]   history loaded: {len(history)} message(s) for template '{template_id}'")
 
     # -------------------------------------------------------------------
     # 2. Determine next sequence number
     # -------------------------------------------------------------------
     next_seq = (history[-1]["sequence_number"] + 1) if history else 1
+    print(f"[TC:service]   next sequence number: {next_seq}")
 
     # -------------------------------------------------------------------
     # 3. Persist and cache the incoming user message
     # -------------------------------------------------------------------
+    print(f"[TC:service]   persisting user message (seq={next_seq}) …")
     user_record = _persist_message(template_id, "user", user_prompt, next_seq)
     append_to_conversation_cache(template_id, [user_record])
+    print(f"[TC:service]   user message persisted (token_count={user_record.get('token_count')})")
 
     # Full history now includes the user message we just stored
     history = history + [user_record]
@@ -339,8 +347,10 @@ def chat_template(
     #    result["messages"] = all input messages + new messages from
     #    this turn (LangGraph's add_messages reducer accumulates them).
     # -------------------------------------------------------------------
+    print(f"[TC:service]   building graph and invoking (Phase 1 chatbot) …")
     graph = build_graph()
     result = graph.invoke(state)
+    print(f"[TC:service]   graph invocation complete | satisfied={result.get('satisfied')} phase={result.get('phase')}")
 
     # -------------------------------------------------------------------
     # 6. Extract newly generated messages
@@ -348,6 +358,7 @@ def chat_template(
     # -------------------------------------------------------------------
     input_count = len(lc_messages)
     new_lc_messages = result["messages"][input_count:]
+    print(f"[TC:service]   new messages generated this turn: {len(new_lc_messages)}")
 
     # -------------------------------------------------------------------
     # 7. Persist new AI / system messages to PostgreSQL + Redis
@@ -360,6 +371,7 @@ def chat_template(
         content = msg.content
         seq     = next_seq + 1 + i
 
+        print(f"[TC:service]   persisting {role} message (seq={seq}, tokens≈{_count_tokens(content)}) …")
         record = _persist_message(template_id, role, content, seq)
         new_cache_records.append(record)
 
@@ -368,16 +380,23 @@ def chat_template(
 
     if new_cache_records:
         append_to_conversation_cache(template_id, new_cache_records)
+        print(f"[TC:service]   {len(new_cache_records)} new message(s) written to Redis cache")
 
     # -------------------------------------------------------------------
-    # 8. Phase transition: if satisfied, trigger Phase 2 automatically and Generation of tool also starts 
+    # 8. Phase transition: if satisfied, trigger Phase 2 automatically and Generation of tool also starts
     # -------------------------------------------------------------------
     if result.get("satisfied", False):
+        print(f"[TC:service] ✔ satisfied=True — Phase 1 complete. Triggering Phase 2 (create_template) …")
         full_history = _load_history(template_id)
+        print(f"[TC:service]   full history for planner: {len(full_history)} message(s)")
         create_template(user_id, template_id, full_history)
+        print(f"[TC:service] ✔ Phase 2 complete. Triggering ToolGeneration pipeline (generate_tool) …")
         generate_tool(template_id)
+        print(f"[TC:service] ✔ generate_tool dispatched for template_id='{template_id}'")
+    else:
+        print(f"[TC:service]   satisfied=False — continuing Phase 1 (gathering requirements)")
 
-
+    print(f"[TC:service] ◄ chat_template returning | response length={len(ai_response)} chars")
     return ai_response
 
 
@@ -412,7 +431,10 @@ def create_template(
     # -------------------------------------------------------------------
     # 1. Reconstruct LangGraph state from the full conversation history
     # -------------------------------------------------------------------
+    print(f"[TC:service] ► create_template called | template_id={template_id!r} user_id={user_id!r}")
+    print(f"[TC:service]   conversation history: {len(template_conv_history)} message(s)")
     lc_messages = _to_langchain_messages(template_conv_history)
+    print(f"[TC:service]   reconstructed {len(lc_messages)} LangChain message(s) for planner")
 
     state: dict = {
         "messages":            lc_messages,
@@ -426,21 +448,29 @@ def create_template(
     # -------------------------------------------------------------------
     # 2. Invoke planner_node directly — no full graph re-run needed
     # -------------------------------------------------------------------
+    print(f"[TC:service]   invoking planner_node (Phase 2) …")
     planner_result = planner_node(state)
+    print(f"[TC:service]   planner_node complete | phase={planner_result.get('phase')}")
 
     tool_generation_prompt = planner_result.get("tool_creation_prompt", "")
     behaviour_prompt       = planner_result.get("system_prompt",         "")
+    print(f"[TC:service]   tool_creation_prompt length: {len(tool_generation_prompt)} chars")
+    print(f"[TC:service]   system_prompt length:        {len(behaviour_prompt)} chars")
 
     # -------------------------------------------------------------------
     # 3. Generate name + description via Groq
     # -------------------------------------------------------------------
+    print(f"[TC:service]   generating template name + description via Groq …")
     name, description = _generate_name_and_description(template_conv_history)
+    print(f"[TC:service]   template name: {name!r}")
+    print(f"[TC:service]   description:   {description!r}")
 
     # -------------------------------------------------------------------
     # 4. Persist to Templates table
     #    tool_information is intentionally omitted — it is populated
     #    by a separate downstream pipeline.
     # -------------------------------------------------------------------
+    print(f"[TC:service]   inserting template record into Templates table …")
     insert_template(
         template_id=template_id,
         user_id=user_id,
@@ -449,3 +479,4 @@ def create_template(
         behaviour_prompt=behaviour_prompt,
         tool_generation_prompt=tool_generation_prompt,
     )
+    print(f"[TC:service] ✔ create_template complete — template '{template_id}' persisted to DB")

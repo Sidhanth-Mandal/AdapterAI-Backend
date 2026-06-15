@@ -24,7 +24,7 @@ Examples:
 TOOL REQUIREMENTS
 --------------------------------------------------
 
-1. ALWAYS create 2-5 reusable functions instead of one giant script.
+1. ALWAYS create 1-5 reusable functions instead of one giant script.
 
 2. Use:
 - free APIs
@@ -33,7 +33,7 @@ TOOL REQUIREMENTS
 - public endpoints whenever possible
 
 3. Avoid:
-- paid APIs unless unavoidable
+- paid APIs
 - extremely heavy frameworks
 - unnecessary abstractions
 - UI code
