@@ -48,6 +48,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ---------------------------------------------------------------------------
+# LangSmith tracing (must be imported after .env is loaded)
+# ---------------------------------------------------------------------------
+from utils.tracing import traceable  # noqa: E402
+
+# ---------------------------------------------------------------------------
 # LangChain ChatGroq client
 # ---------------------------------------------------------------------------
 
@@ -135,6 +140,11 @@ Begin by analysing what functions you need to call to complete this task.
 # Core agent loop
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="custom_tool_subagent",
+    tags=["subagent", "custom-tool"],
+    metadata={"pipeline": "CustomToolSubAgent"},
+)
 def run_custom_tool_subagent(
     query: str,
     configurable: dict,
@@ -268,6 +278,10 @@ def run_custom_tool_subagent(
 # Helpers
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="subagent_llm_call",
+    tags=["subagent", "llm"],
+)
 def _chat(history: list[BaseMessage]) -> str:
     """
     Invoke ChatGroq with the current message history and return the assistant

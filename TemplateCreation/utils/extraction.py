@@ -6,7 +6,7 @@ raw LLM response.
 """
 
 import re
-from typing import Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -108,3 +108,97 @@ def clean_chatbot_response(content: str) -> str:
     # Collapse any triple+ blank lines that result from the removal
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# MCQ question parser
+# ---------------------------------------------------------------------------
+
+def parse_mcq_questions(response_text: str) -> List[Dict]:
+    """
+    Parse the chatbot's response and extract structured MCQ question blocks.
+
+    The chatbot is instructed to output questions in this exact format::
+
+        **<Question text>**
+        a) <option A>
+        b) <option B>
+        c) <option C>
+        d) <option D>
+        __________________ (or tell us in your own words)
+
+    Parameters
+    ----------
+    response_text : str
+        The visible (already-cleaned) assistant response.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has the shape::
+
+            {
+                "question": "<question text>",
+                "options": [
+                    {"label": "a", "text": "<option A>"},
+                    {"label": "b", "text": "<option B>"},
+                    {"label": "c", "text": "<option C>"},
+                    {"label": "d", "text": "<option D>"},
+                    {"label": "custom", "text": ""}
+                ]
+            }
+
+        Returns an empty list if no properly-formatted question blocks are found.
+    """
+    questions: List[Dict] = []
+
+    # Match a question block: bold header + a)/b)/c)/d) lines + __ line
+    # The bold header pattern: **...**  (possibly with leading whitespace)
+    block_pattern = re.compile(
+        r"\*\*(.+?)\*\*"          # **Question text**
+        r"\s*\n"
+        r"a\)\s*(.+?)\n"          # a) ...
+        r"b\)\s*(.+?)\n"          # b) ...
+        r"c\)\s*(.+?)\n"          # c) ...
+        r"d\)\s*(.+?)\n"          # d) ...
+        r"_{3,}.*",               # __________________ line
+        re.DOTALL,
+    )
+
+    for m in block_pattern.finditer(response_text):
+        question_text = m.group(1).strip()
+        options = [
+            {"label": "a", "text": m.group(2).strip()},
+            {"label": "b", "text": m.group(3).strip()},
+            {"label": "c", "text": m.group(4).strip()},
+            {"label": "d", "text": m.group(5).strip()},
+            {"label": "custom", "text": ""},
+        ]
+        questions.append({"question": question_text, "options": options})
+
+    return questions
+
+
+def extract_preamble(response_text: str) -> str:
+    """
+    Return only the non-question preamble text from a chatbot response.
+
+    Everything before the first ``**...**`` question block is considered
+    preamble (acknowledgement / summary text that the frontend can render
+    as plain prose above the MCQ cards).
+
+    Parameters
+    ----------
+    response_text : str
+        The full visible assistant response.
+
+    Returns
+    -------
+    str
+        Preamble text stripped of trailing whitespace.  May be an empty
+        string if the response starts immediately with a question block.
+    """
+    first_question = re.search(r"\*\*", response_text)
+    if first_question:
+        return response_text[: first_question.start()].strip()
+    return response_text.strip()

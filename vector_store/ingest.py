@@ -35,6 +35,9 @@ from .chunking       import chunk_text
 from .embeddings     import embed_texts
 from .pinecone_client import upsert_vectors
 
+# ── LangSmith tracing ─────────────────────────────────────────────────────────
+from utils.tracing import traceable  # noqa: E402
+
 
 # ── Cloudflare config ─────────────────────────────────────────────────────────
 CF_API_TOKEN  = os.getenv("CLOUDFLARE_API_TOKEN", "")
@@ -222,6 +225,11 @@ def _detect_and_extract(filename: str, file_bytes: bytes) -> str:
 
 # ── main public API ────────────────────────────────────────────────────────────
 
+@traceable(
+    name="vector_store_ingest",
+    tags=["vector-store", "ingest"],
+    metadata={"pipeline": "VectorStore"},
+)
 def ingest_file(
     file_bytes: bytes,
     filename:   str,
@@ -292,6 +300,11 @@ def ingest_file(
     }
 
 
+@traceable(
+    name="vector_store_ingest_path",
+    tags=["vector-store", "ingest"],
+    metadata={"pipeline": "VectorStore"},
+)
 def ingest_file_path(
     filepath:  Union[str, Path],
     user_id:   str,

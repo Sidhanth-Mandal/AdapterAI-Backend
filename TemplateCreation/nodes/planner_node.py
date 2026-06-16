@@ -21,10 +21,12 @@ import os
 from pathlib import Path
 
 from langchain_groq import ChatGroq
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from TemplateCreation.state import GraphState
-from utils.extraction import extract_planner_outputs
+from TemplateCreation.utils.extraction import extract_planner_outputs
+from utils.tracing import traceable  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -39,13 +41,21 @@ _SYSTEM_PROMPT = (_PROMPTS_DIR / "planner_system.txt").read_text(encoding="utf-8
 # ---------------------------------------------------------------------------
 def _build_llm() -> ChatGroq:
     """Instantiate the Groq LLM for Phase 2 planning."""
-    return ChatGroq(
-        model="openai/gpt-oss-120b",
-        temperature=0.4,
-        max_tokens=4096,
-        streaming=False,
-        api_key=os.environ["GROQ_API_KEY"],
-    )
+    # return ChatGroq(
+    #     model="openai/gpt-oss-120b",
+    #     temperature=0.4,
+    #     max_tokens=4096,
+    #     streaming=False,
+    #     api_key=os.environ["GROQ_API_KEY"],
+    # )
+    return ChatAnthropic(
+        model = 'claude-sonnet-4-6',
+        temperature= 0.4,
+        max_tokens =4024,
+        streaming= False,
+        api_key=os.environ["ANTHROPIC_API_KEY"]
+             
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +109,11 @@ def _build_planner_message(state: GraphState) -> str:
 # ---------------------------------------------------------------------------
 # Node function
 # ---------------------------------------------------------------------------
+@traceable(
+    name="tc_planner_node",
+    tags=["template-creation", "node", "planner"],
+    metadata={"pipeline": "TemplateCreation"},
+)
 def planner_node(state: GraphState) -> dict:
     """
     LangGraph node for Phase 2 — planning and output generation.

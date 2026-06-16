@@ -41,6 +41,11 @@ from .executer import execution_call
 from .validator import validate_tool
 
 # ---------------------------------------------------------------------------
+# LangSmith tracing
+# ---------------------------------------------------------------------------
+from utils.tracing import traceable  # noqa: E402
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -121,6 +126,11 @@ def _latest_stage_name(report) -> str:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="tool_generation_pipeline",
+    tags=["tool-generation"],
+    metadata={"pipeline": "ToolGeneration"},
+)
 def generate_tool(template_id: str) -> dict:
     """
     End-to-end tool generation pipeline.

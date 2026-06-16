@@ -32,6 +32,11 @@ from ToolGeneration.SystemPrompt import system_prompt
 load_dotenv()
 
 # ---------------------------------------------------------------------------
+# LangSmith tracing
+# ---------------------------------------------------------------------------
+from utils.tracing import traceable  # noqa: E402
+
+# ---------------------------------------------------------------------------
 # Shared Groq client
 # ---------------------------------------------------------------------------
 
@@ -173,6 +178,11 @@ def _summarise_history(error_history: list[dict]) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="tool_gen_initial_llm",
+    tags=["tool-generation", "llm", "generate"],
+    metadata={"pipeline": "ToolGeneration"},
+)
 def generate_tool_json(user_prompt: str) -> dict:
     """
     Call Groq with the standard system prompt and return a validated tool dict.
@@ -209,6 +219,11 @@ def generate_tool_json(user_prompt: str) -> dict:
     return tool.model_dump()
 
 
+@traceable(
+    name="tool_gen_repair_llm",
+    tags=["tool-generation", "llm", "repair"],
+    metadata={"pipeline": "ToolGeneration"},
+)
 def repair_tool_json(
     tool_json: dict,
     error_history: list[dict],

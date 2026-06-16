@@ -22,7 +22,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from apis.auth import get_current_user
-from apis.schemas import TempChatRequest, TempChatResponse
+from apis.schemas import MCQOption, MCQQuestion, TempChatRequest, TempChatResponse
 
 # TemplateCreation uses bare internal imports (e.g. `from graph import …`)
 # which require its own directory to be on sys.path. Patch it here so that
@@ -32,6 +32,7 @@ if str(_TC_DIR) not in sys.path:
     sys.path.insert(0, str(_TC_DIR))
 
 from TemplateCreation.service import chat_template  # noqa: E402
+from TemplateCreation.utils.extraction import extract_preamble, parse_mcq_questions  # noqa: E402
 
 router = APIRouter(prefix="/tempchat", tags=["Template Chat"])
 
@@ -67,4 +68,24 @@ async def tempchat_endpoint(
             detail=f"TemplateCreation pipeline error: {exc}",
         )
 
-    return TempChatResponse(template_id=body.template_id, response=response_text)
+    # -----------------------------------------------------------------------
+    # Parse the structured MCQ blocks out of the raw assistant response so
+    # the frontend can render interactive tick-mark cards instead of raw text.
+    # -----------------------------------------------------------------------
+    raw_questions = parse_mcq_questions(response_text)
+    preamble      = extract_preamble(response_text)
+
+    questions = [
+        MCQQuestion(
+            question=q["question"],
+            options=[MCQOption(label=opt["label"], text=opt["text"]) for opt in q["options"]],
+        )
+        for q in raw_questions
+    ]
+
+    return TempChatResponse(
+        template_id=body.template_id,
+        preamble=preamble,
+        questions=questions,
+        response=response_text,
+    )

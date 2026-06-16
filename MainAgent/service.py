@@ -44,6 +44,11 @@ from dotenv import load_dotenv
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ---------------------------------------------------------------------------
+# LangSmith tracing (must be imported after .env is loaded)
+# ---------------------------------------------------------------------------
+from utils.tracing import traceable  # noqa: E402
+
+# ---------------------------------------------------------------------------
 # Internal imports (env vars must be loaded first)
 # ---------------------------------------------------------------------------
 
@@ -55,6 +60,11 @@ from MainAgent.state import OrchestratorState
 # Public API
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="main_agent_chat",
+    tags=["main-agent"],
+    metadata={"pipeline": "MainAgent"},
+)
 async def chat(
     template_id: str,
     user_id: str,
@@ -139,6 +149,11 @@ async def chat(
     return result["final_response"]
 
 
+@traceable(
+    name="main_agent_chat_debug",
+    tags=["main-agent", "debug"],
+    metadata={"pipeline": "MainAgent"},
+)
 async def chat_debug(
     template_id: str,
     user_id: str,

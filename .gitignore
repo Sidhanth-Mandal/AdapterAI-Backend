@@ -1,4 +1,7 @@
 .env
 myenv/
 __pycache__/
-codeexecuter/test.py
+future_improvement.py
+Removed Files/
+testing/
+.pytest_cache

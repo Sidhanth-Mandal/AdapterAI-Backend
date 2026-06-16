@@ -25,9 +25,17 @@ from typing import Any, Dict, List, Optional
 from .embeddings     import embed_query
 from .pinecone_client import query_vectors
 
+# ── LangSmith tracing ─────────────────────────────────────────────────────────
+from utils.tracing import traceable  # noqa: E402
+
 
 # ── public API ─────────────────────────────────────────────────────────────────
 
+@traceable(
+    name="vector_store_retrieve",
+    tags=["vector-store", "retrieve"],
+    metadata={"pipeline": "VectorStore"},
+)
 def retrieve_chunks(
     query:      str,
     user_id:    str,
@@ -85,6 +93,11 @@ def retrieve_chunks(
     return hits
 
 
+@traceable(
+    name="vector_store_retrieve_context",
+    tags=["vector-store", "retrieve"],
+    metadata={"pipeline": "VectorStore"},
+)
 def retrieve_context_string(
     query:      str,
     user_id:    str,

@@ -7,7 +7,7 @@ Pydantic request/response models for all AdapterAI API endpoints.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -94,10 +94,53 @@ class TempChatRequest(BaseModel):
     user_prompt: str
 
 
+class MCQOption(BaseModel):
+    """
+    A single selectable option within a MCQ question.
+
+    label  — one of "a", "b", "c", "d", or "custom".
+             "custom" is the free-text write-in slot (text will always be
+             an empty string from the server; the frontend fills it at runtime).
+    text   — the display text for the option.  Empty string for "custom".
+    """
+    label: str = Field(..., description="'a'|'b'|'c'|'d'|'custom'")
+    text: str  = Field(..., description="Display text; empty for 'custom' (write-in) option")
+
+
+class MCQQuestion(BaseModel):
+    """
+    A single MCQ question block with four labelled options plus a free-text slot.
+    """
+    question: str             = Field(..., description="The question text (markdown bold stripped)")
+    options:  List[MCQOption] = Field(..., description="Always 5 items: a, b, c, d, custom")
+
+
 class TempChatResponse(BaseModel):
-    """Returned by POST /tempchat/"""
+    """
+    Returned by POST /tempchat/
+
+    Fields
+    ------
+    template_id : str
+        Echoes back the template ID from the request.
+    preamble : str
+        The acknowledgement / summary text that precedes the questions.
+        May be empty on the very first turn or when the agent goes straight
+        to questions.  Render this as plain prose above the MCQ cards.
+    questions : list[MCQQuestion]
+        Structured question blocks (0–4 per turn).  Each block contains the
+        question text and five options (a, b, c, d, custom).  An empty list
+        means the agent produced a closing/informational message with no
+        questions (e.g. the final satisfaction message).
+    response : str
+        The full raw assistant response text (preamble + question blocks
+        concatenated).  Kept for backward-compatibility and for fallback
+        rendering if the frontend cannot parse ``questions``.
+    """
     template_id: str
-    response: str
+    preamble:    str                = Field("", description="Prose before the MCQ questions")
+    questions:   List[MCQQuestion]  = Field(default_factory=list, description="Parsed MCQ blocks")
+    response:    str                = Field(..., description="Full raw assistant response (fallback)")
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,11 @@ _ROOT_ENV = _MODULE_DIR.parent / ".env"
 load_dotenv(dotenv_path=_ROOT_ENV if _ROOT_ENV.exists() else None, override=False)
 
 # ---------------------------------------------------------------------------
+# LangSmith tracing (must come after .env is loaded)
+# ---------------------------------------------------------------------------
+from utils.tracing import traceable  # noqa: E402
+
+# ---------------------------------------------------------------------------
 # Internal imports (env vars must be available first)
 # ---------------------------------------------------------------------------
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -249,6 +254,11 @@ def _generate_name_and_description(
 # Public API
 # ===========================================================================
 
+@traceable(
+    name="template_creation_chat",
+    tags=["template-creation", "chat"],
+    metadata={"pipeline": "TemplateCreation"},
+)
 def chat_template(
     template_id: str,
     user_id: str,
@@ -400,6 +410,11 @@ def chat_template(
     return ai_response
 
 
+@traceable(
+    name="template_creation_plan",
+    tags=["template-creation", "planner"],
+    metadata={"pipeline": "TemplateCreation"},
+)
 def create_template(
     user_id: str,
     template_id: str,
