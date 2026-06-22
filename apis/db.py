@@ -180,6 +180,24 @@ def fetch_conversations_for_user(user_id: str) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def update_conversation_title(conv_id: str, title: str) -> None:
+    """
+    Set (or overwrite) the title for a conversation row.
+
+    Called once after the first agent response in a brand-new conversation
+    so that GET /loadconv/ returns a human-readable title instead of null.
+
+    Parameters
+    ----------
+    conv_id : str  — The conversation to update.
+    title   : str  — The LLM-generated 5-6 word title.
+    """
+    sql = "UPDATE conversations SET title = %s WHERE conv_id = %s"
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (title, conv_id))
+
+
 # ---------------------------------------------------------------------------
 # Message helpers
 # ---------------------------------------------------------------------------
@@ -346,9 +364,12 @@ def delete_template(template_id: str, user_id: str) -> bool:
     bool — True if a row was deleted, False if not found / not owned.
     """
     sql = """
-        DELETE FROM templates
+        UPDATE templates
+        SET created_by = '37a206ad-f284-403a-91b8-987b7fe41220'
         WHERE  template_id = %s AND created_by = %s
     """
+    #all the deleted templates will point to this user_id : 37a206ad-f284-403a-91b8-987b7fe41220 specially made to keep deleted templates.
+    
     with _get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (template_id, user_id))

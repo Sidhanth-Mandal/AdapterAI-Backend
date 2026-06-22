@@ -2,11 +2,15 @@
 apis/routers/template_router.py
 --------------------------------
 GET  /loadtemplate/
-    Returns all templates that belong to the authenticated user.
+    Returns all templates for the authenticated user.
+    The built-in DEFAULT template is always prepended to the list,
+    regardless of what the user has created. It is defined locally in
+    apis/default_template.py and is never stored in the database.
 
 DELETE /loadtemplate/{template_id}
     Permanently deletes a template from the database.
     Only the user who created the template (created_by) can delete it.
+    The DEFAULT template cannot be deleted (it lives only in code).
 
 No query parameters are required — user identity comes from the JWT token.
 """
@@ -20,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from apis.auth import get_current_user
 from apis.db import delete_template, fetch_templates_for_user
+from apis.default_template import DEFAULT_TEMPLATE_RECORD
 from apis.schemas import (
     DeleteTemplateResponse,
     TemplateListResponse,
@@ -47,7 +52,10 @@ async def load_templates(
     user_id: Annotated[str, Depends(get_current_user)],
 ) -> TemplateListResponse:
     rows = await asyncio.to_thread(fetch_templates_for_user, user_id)
-    templates = [TemplateRecord(**r) for r in rows]
+    user_templates = [TemplateRecord(**r) for r in rows]
+    # Always include the built-in DEFAULT template first so every user
+    # has at least one template available out of the box.
+    templates = [DEFAULT_TEMPLATE_RECORD] + user_templates
     return TemplateListResponse(user_id=user_id, templates=templates)
 
 
