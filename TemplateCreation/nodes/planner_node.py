@@ -5,13 +5,13 @@ Phase 2 — Tool Creation Prompt & System Prompt Generator Node
 
 After the requirements chatbot (Phase 1) signals satisfaction, this node
 takes over. It reads the full conversation history and uses a dedicated
-Groq call to produce two structured outputs:
+Anthropic call to produce two structured outputs via `with_structured_output`:
 
-  1. Tool Creation Prompt  — detailed implementation spec for a tool-building AI
-  2. System Prompt         — full behavioural specification for the final assistant
+  1. tool_creation_prompt  — detailed implementation spec for a tool-building AI
+  2. behavior_prompt       — full behavioural specification for the final assistant
 
-Both outputs are extracted from the LLM response using delimiter parsing
-and stored back in state for the service layer to persist.
+The LLM is bound to the `PlannerOutput` Pydantic schema, so the response is
+a validated dict — no delimiter parsing or regex extraction needed.
 
 Note: all terminal print output has been removed.
       This node is designed to be called from the service layer, not a CLI.
@@ -20,12 +20,11 @@ Note: all terminal print output has been removed.
 import os
 from pathlib import Path
 
-from langchain_groq import ChatGroq
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from TemplateCreation.state import GraphState
-from TemplateCreation.utils.extraction import extract_planner_outputs
+from TemplateCreation.utils.extraction import PlannerOutput
 from utils.tracing import traceable  # noqa: E402
 
 
@@ -37,25 +36,20 @@ _SYSTEM_PROMPT = (_PROMPTS_DIR / "planner_system.txt").read_text(encoding="utf-8
 
 
 # ---------------------------------------------------------------------------
-# Groq LLM — higher context, non-streaming (structured output)
+# Anthropic LLM bound to structured output schema
 # ---------------------------------------------------------------------------
-def _build_llm() -> ChatGroq:
-    """Instantiate the Groq LLM for Phase 2 planning."""
-    # return ChatGroq(
-    #     model="openai/gpt-oss-120b",
-    #     temperature=0.4,
-    #     max_tokens=4096,
-    #     streaming=False,
-    #     api_key=os.environ["GROQ_API_KEY"],
-    # )
-    return ChatAnthropic(
-        model = 'claude-sonnet-4-6',
-        temperature= 0.4,
-        max_tokens =4024,
-        streaming= False,
-        api_key=os.environ["ANTHROPIC_API_KEY"]
-             
-        )
+def _build_llm() -> ChatAnthropic:
+    """Instantiate the Anthropic LLM for Phase 2 planning with structured output."""
+    llm = ChatAnthropic(
+        model="claude-haiku-4-5",
+        temperature=0.4,
+        max_tokens=8096,
+        streaming=False,
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+    )
+    # Bind the Pydantic schema so the model always returns a validated
+    # {tool_creation_prompt, behavior_prompt} dict — no parsing required.
+    return llm.with_structured_output(PlannerOutput)
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +94,7 @@ def _build_planner_message(state: GraphState) -> str:
     lines += [
         "=" * 60,
         "",
-        "Now generate the TOOL CREATION PROMPT and SYSTEM PROMPT using the exact format specified.",
+        "Now generate the TOOL CREATION PROMPT and BEHAVIOR PROMPT based on the conversation above.",
     ]
 
     return "\n".join(lines)
@@ -118,10 +112,14 @@ def planner_node(state: GraphState) -> dict:
     """
     LangGraph node for Phase 2 — planning and output generation.
 
-    Reads the full conversation transcript from state, calls the Groq
-    planner LLM, and extracts the two structured outputs:
+    Reads the full conversation transcript from state, calls the Anthropic
+    planner LLM with structured output, and unpacks the two validated fields:
     - tool_creation_prompt
-    - system_prompt
+    - behavior_prompt
+
+    The model is bound to the `PlannerOutput` Pydantic schema via
+    `with_structured_output`, so the result is always a well-typed dict
+    regardless of how the model formats its internal text.
 
     Parameters
     ----------
@@ -131,8 +129,8 @@ def planner_node(state: GraphState) -> dict:
     Returns
     -------
     dict
-        Partial state update containing tool_creation_prompt, system_prompt,
-        and phase set to "done".
+        Partial state update containing tool_creation_prompt, behavior_prompt,
+        and phase set to \"done\".
     """
     llm = _build_llm()
 
@@ -145,37 +143,27 @@ def planner_node(state: GraphState) -> dict:
         HumanMessage(content=planner_message),
     ]
 
-    print(f"[TC:planner]   invoking Groq LLM (Phase 2 planner) …")
-    response    = llm.invoke(messages)
-    raw_output  = response.content
-    print(f"[TC:planner]   LLM responded | raw output length: {len(raw_output)} chars")
+    print("[TC:planner]   invoking Anthropic LLM (Phase 2 planner — structured output) …")
+    # `llm` is already bound to PlannerOutput via with_structured_output.
+    # The result is a PlannerOutput Pydantic object (not a raw AIMessage).
+    result: PlannerOutput = llm.invoke(messages)
 
-    # -----------------------------------------------------------------------
-    # Extract the two delimited sections
-    # -----------------------------------------------------------------------
-    tool_creation_prompt, system_prompt = extract_planner_outputs(raw_output)
-    print(f"[TC:planner]   tool_creation_prompt extracted: {len(tool_creation_prompt)} chars {'(OK)' if tool_creation_prompt else '(EMPTY — parse may have failed)'}")
-    print(f"[TC:planner]   system_prompt extracted:        {len(system_prompt)} chars {'(OK)' if system_prompt else '(EMPTY — parse may have failed)'}")
+    # Unpack the validated structured fields — no regex or fallback needed.
+    tool_creation_prompt: str = result.tool_creation_prompt
+    behavior_prompt: str      = result.behavior_prompt
 
-    # -----------------------------------------------------------------------
-    # Fallback: if parsing fails, store the raw output for inspection
-    # -----------------------------------------------------------------------
-    if not tool_creation_prompt:
-        print("[TC:planner]   ⚠ WARNING: tool_creation_prompt parse FAILED — storing raw output as fallback")
-        tool_creation_prompt = (
-            "[PARSE ERROR] Could not extract Tool Creation Prompt.\n\n"
-            "Raw planner output:\n" + raw_output
-        )
-    if not system_prompt:
-        print("[TC:planner]   ⚠ WARNING: system_prompt parse FAILED — storing raw output as fallback")
-        system_prompt = (
-            "[PARSE ERROR] Could not extract System Prompt.\n\n"
-            "Raw planner output:\n" + raw_output
-        )
+    print(
+        f"[TC:planner]   tool_creation_prompt: {len(tool_creation_prompt)} chars "
+        f"{'(OK)' if tool_creation_prompt else '(EMPTY)'}"
+    )
+    print(
+        f"[TC:planner]   behavior_prompt:      {len(behavior_prompt)} chars "
+        f"{'(OK)' if behavior_prompt else '(EMPTY)'}"
+    )
+    print("[TC:planner] ◄ planner_node returning | phase='done'")
 
-    print(f"[TC:planner] ◄ planner_node returning | phase='done'")
     return {
         "tool_creation_prompt": tool_creation_prompt,
-        "system_prompt":        system_prompt,
+        "behavior_prompt":      behavior_prompt,
         "phase":                "done",
     }

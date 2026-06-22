@@ -20,8 +20,10 @@ import asyncio
 from MainAgent.db.postgres_client import fetch_template
 from MainAgent.db.redis_client import get_template_cache, set_template_cache
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 
+@traceable(name="load_template_node", tags=["main-agent", "node"])
 async def load_template_node(state: OrchestratorState) -> dict:
     """
     Load template configuration.

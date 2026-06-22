@@ -33,8 +33,10 @@ from MainAgent.db.postgres_client import (
     update_unsummarized_token_count,
 )
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 
+@traceable(name="persist_messages_node", tags=["main-agent", "node"])
 async def persist_messages_node(state: OrchestratorState) -> dict:
     """
     Persist user + assistant messages and update conversation metadata.

@@ -25,8 +25,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from MainAgent.prompts import ORCHESTRATOR_SYSTEM_PROMPT, build_full_context
 from MainAgent.state import OrchestratorState
 from .orchestrator_agent_node import _safe_print
+from utils.tracing import traceable
 
 
+@traceable(name="build_context_node", tags=["main-agent", "node"])
 async def build_context_node(state: OrchestratorState) -> dict:
     """
     Build the initial message list for the orchestrator agent.

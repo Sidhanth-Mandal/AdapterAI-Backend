@@ -33,8 +33,8 @@ class GraphState(TypedDict):
     tool_creation_prompt : str
         The detailed tool-generation instruction prompt produced by the planner.
         Empty string until Phase 2 completes.
-    system_prompt : str
-        The final assistant system prompt produced by the planner.
+    behavior_prompt : str
+        The final assistant behavior/system prompt produced by the planner.
         Empty string until Phase 2 completes.
     """
 
@@ -43,4 +43,4 @@ class GraphState(TypedDict):
     satisfied: bool
     requirements: dict
     tool_creation_prompt: str
-    system_prompt: str
+    behavior_prompt: str

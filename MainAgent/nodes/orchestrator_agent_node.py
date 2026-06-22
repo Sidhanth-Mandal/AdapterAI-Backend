@@ -57,6 +57,7 @@ except ImportError:  # older groq version or not installed
     _GroqBadRequestError = None
 
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -240,6 +241,7 @@ async def _invoke_tool(
 # Node
 # ---------------------------------------------------------------------------
 
+@traceable(name="orchestrator_agent_node", tags=["main-agent", "node"])
 async def orchestrator_agent_node(state: OrchestratorState) -> dict:
     """
     Core orchestration loop: invoke LLM → execute tools → repeat until done.
@@ -376,6 +378,222 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
         _dbg_final(final_response, f"max iterations ({MAX_TOOL_ITERATIONS}) reached")
 
     _safe_print(f"\n[AGENT] Turn complete. tools_called={tools_called}")
+
+    # ── Return only messages added this turn ──────────────────────────────────
+    new_messages = messages[initial_count:]
+
+    return {
+        "messages":       new_messages,
+        "final_response": final_response,
+        "tools_called":   tools_called,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Streaming variant
+# ---------------------------------------------------------------------------
+
+from typing import AsyncGenerator, Callable, Awaitable  # noqa: E402 (already imported above)
+
+
+@traceable(name="orchestrator_agent_node_stream", tags=["main-agent", "node", "streaming"])
+async def orchestrator_agent_node_stream(
+    state: OrchestratorState,
+    emit: Callable[[dict], Awaitable[None]],
+) -> AsyncGenerator[None, None]:
+    """
+    Streaming variant of orchestrator_agent_node.
+
+    Instead of returning all output at the end, this coroutine progressively
+    *emits* structured events via the ``emit`` async callback so that a
+    caller (e.g. the streaming API endpoint) can forward them to the client
+    over SSE as they happen.
+
+    Event types emitted
+    -------------------
+    ``tool_call``
+        Emitted **before** each tool batch is dispatched.
+        One event per tool call in the batch.
+        Payload: ``{"type": "tool_call", "tool": <name>, "args": <dict>}``
+
+    ``token``
+        Emitted for each text chunk produced by the LLM when streaming
+        the **final** response (i.e. the turn where the model decides to
+        stop calling tools and reply directly).
+        Payload: ``{"type": "token", "content": <str>}``
+
+    Parameters
+    ----------
+    state : OrchestratorState
+        The full current pipeline state (must include ``messages``,
+        ``user_id``, ``conv_id``, ``if_attachment``).
+    emit : async callable
+        ``await emit(event_dict)`` is called for every event.
+
+    Returns
+    -------
+    dict
+        Identical shape to ``orchestrator_agent_node``:
+        ``{"messages": [...], "final_response": str, "tools_called": [...]}``
+    """
+    tools    = _build_tools(state["if_attachment"])
+    tool_map = {t.name: t for t in tools}
+
+    _safe_print(f"\n{'='*60}")
+    _safe_print(f"[AGENT-STREAM] Starting orchestrator  model={_MODEL}")
+    _safe_print(f"               Available tools : {list(tool_map.keys())}")
+    _safe_print(f"               User prompt     : {state['user_prompt'][:200]}")
+    _safe_print(f"{'='*60}")
+
+    # ── LLM setup ─────────────────────────────────────────────────────────────
+    llm = ChatAnthropic(
+        model_name=_MODEL,
+        max_tokens=4096,
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+    )
+    llm_with_tools = llm.bind_tools(tools)
+
+    # ── Config carries identity for tools that need it ────────────────────────
+    runnable_config = RunnableConfig(configurable={
+        "user_id":   state["user_id"],
+        "conv_id":   state["conv_id"],
+        "thread_id": f"{state['user_id']}:{state['conv_id']}",
+    })
+
+    # ── Snapshot state message count so we return ONLY new messages ───────────
+    initial_count = len(state["messages"])
+    messages = list(state["messages"])  # working copy
+
+    final_response = ""
+    tools_called: List[str] = []
+
+    # ── Iterative tool-calling loop ───────────────────────────────────────────
+    for iteration in range(MAX_TOOL_ITERATIONS):
+        _safe_print(f"\n[AGENT-STREAM] --- Loop iteration {iteration + 1}/{MAX_TOOL_ITERATIONS} ---")
+
+        # ── LLM call (blocking — we need to know whether tools are requested) ─
+        try:
+            response = await llm_with_tools.ainvoke(messages, config=runnable_config)
+        except Exception as llm_exc:  # noqa: BLE001
+            err_str = str(llm_exc).lower()
+            is_bad_request = (
+                "400" in err_str
+                or "tool_use_failed" in err_str
+                or "invalid_request" in err_str
+                or (_GroqBadRequestError and isinstance(llm_exc, _GroqBadRequestError))
+            )
+            if not is_bad_request:
+                _safe_print(f"[AGENT-STREAM] Non-400 error -- re-raising: {type(llm_exc).__name__}: {llm_exc}")
+                raise
+
+            # Fallback: plain LLM with streaming for the recovery response
+            _safe_print(f"[AGENT-STREAM] Malformed tool-call 400 -- falling back to plain LLM (streaming)")
+            error_hint = HumanMessage(content=(
+                f"A tool-call formatting error occurred: {llm_exc}. "
+                "Please provide a direct, helpful answer based on what you know, "
+                "without calling any tools."
+            ))
+            messages.append(error_hint)
+
+            # Stream the fallback response
+            accumulated = ""
+            async for chunk in llm.astream(messages, config=runnable_config):
+                chunk_text = _extract_text(chunk.content)
+                if chunk_text:
+                    accumulated += chunk_text
+                    await emit({"type": "token", "content": chunk_text})
+
+            # Build a synthetic AIMessage so the message list stays consistent
+            from langchain_core.messages import AIMessage
+            fallback_msg = AIMessage(content=accumulated)
+            messages.append(fallback_msg)
+            final_response = accumulated
+            _dbg_final(final_response, "400 fallback to plain LLM (streaming)")
+            break
+
+        # ── Log what the LLM returned ─────────────────────────────────────────
+        _dbg_llm_response(iteration + 1, response)
+        messages.append(response)
+
+        # ── No tool calls → this IS the final answer — emit it as tokens ──────
+        if not response.tool_calls:
+            _safe_print(f"[AGENT-STREAM] No tool calls — emitting ainvoke response as tokens …")
+
+            # We already have the complete response from ainvoke above.
+            # Emit it as token events directly — no second LLM call needed.
+            # Split on words to give the frontend a smooth streaming effect
+            # while keeping the total number of emit() calls reasonable.
+            final_text = _extract_text(response.content)
+            final_response = final_text
+
+            # Emit in ~10-char chunks to simulate streaming granularity
+            chunk_size = 10
+            for i in range(0, len(final_text), chunk_size):
+                chunk = final_text[i:i + chunk_size]
+                await emit({"type": "token", "content": chunk})
+
+            _dbg_final(final_response, "no more tool calls — emitted from ainvoke")
+            break
+
+        # ── Emit tool_call events BEFORE dispatching ──────────────────────────
+        _safe_print(f"\n[AGENT-STREAM] Emitting {len(response.tool_calls)} tool_call event(s) …")
+        for tc in response.tool_calls:
+            _dbg_tool_start(tc["name"], tc.get("args", {}))
+            await emit({
+                "type": "tool_call",
+                "tool": tc["name"],
+                "args": tc.get("args", {}),
+            })
+
+        # ── Execute all tool calls concurrently ───────────────────────────────
+        tool_tasks = [
+            _invoke_tool(tc, tool_map, runnable_config)
+            for tc in response.tool_calls
+        ]
+        results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+
+        # ── Build ToolMessages, log results, record names ─────────────────────
+        tool_messages: List[ToolMessage] = []
+        for tc, result in zip(response.tool_calls, results):
+            tools_called.append(tc["name"])
+            _dbg_tool_result(tc["name"], result)
+
+            if isinstance(result, Exception):
+                content = f"[Tool Error] {type(result).__name__}: {result}"
+            else:
+                content = str(result)
+
+            tool_messages.append(ToolMessage(
+                content=content,
+                tool_call_id=tc["id"],
+                name=tc["name"],
+            ))
+
+        messages.extend(tool_messages)
+
+    else:
+        # ── Max iterations reached: force a final answer (streamed) ──────────
+        _safe_print(f"\n[AGENT-STREAM] Max iterations ({MAX_TOOL_ITERATIONS}) reached — forcing final answer (streaming)")
+        messages.append(HumanMessage(content=(
+            "You have reached the maximum number of tool call iterations. "
+            "Based on all information gathered so far, provide your best "
+            "final answer now. Do not make any more tool calls."
+        )))
+
+        accumulated = ""
+        async for chunk in llm.astream(messages, config=runnable_config):
+            chunk_text = _extract_text(chunk.content)
+            if chunk_text:
+                accumulated += chunk_text
+                await emit({"type": "token", "content": chunk_text})
+
+        from langchain_core.messages import AIMessage
+        forced_msg = AIMessage(content=accumulated)
+        messages.append(forced_msg)
+        final_response = accumulated
+        _dbg_final(final_response, f"max iterations ({MAX_TOOL_ITERATIONS}) reached — streamed")
+
+    _safe_print(f"\n[AGENT-STREAM] Turn complete. tools_called={tools_called}")
 
     # ── Return only messages added this turn ──────────────────────────────────
     new_messages = messages[initial_count:]

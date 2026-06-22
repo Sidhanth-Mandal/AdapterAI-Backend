@@ -25,8 +25,10 @@ import asyncio
 from MainAgent.db.postgres_client import fetch_recent_messages
 from MainAgent.db.redis_client import set_conversation_cache
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 
+@traceable(name="redis_update_node", tags=["main-agent", "node"])
 async def redis_update_node(state: OrchestratorState) -> dict:
     """
     Refresh the Redis conversation cache with the latest persisted messages.

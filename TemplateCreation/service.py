@@ -343,7 +343,7 @@ def chat_template(
         "satisfied":           False,
         "requirements":        {},
         "tool_creation_prompt": "",
-        "system_prompt":       "",
+        "behavior_prompt":      "",
     }
 
     # -------------------------------------------------------------------
@@ -457,7 +457,7 @@ def create_template(
         "satisfied":           True,
         "requirements":        {},
         "tool_creation_prompt": "",
-        "system_prompt":       "",
+        "behavior_prompt":      "",
     }
 
     # -------------------------------------------------------------------
@@ -468,9 +468,9 @@ def create_template(
     print(f"[TC:service]   planner_node complete | phase={planner_result.get('phase')}")
 
     tool_generation_prompt = planner_result.get("tool_creation_prompt", "")
-    behaviour_prompt       = planner_result.get("system_prompt",         "")
+    behaviour_prompt       = planner_result.get("behavior_prompt",       "")
     print(f"[TC:service]   tool_creation_prompt length: {len(tool_generation_prompt)} chars")
-    print(f"[TC:service]   system_prompt length:        {len(behaviour_prompt)} chars")
+    print(f"[TC:service]   behavior_prompt length:      {len(behaviour_prompt)} chars")
 
     # -------------------------------------------------------------------
     # 3. Generate name + description via Groq

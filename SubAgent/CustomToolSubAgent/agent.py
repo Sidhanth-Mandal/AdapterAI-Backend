@@ -58,19 +58,28 @@ from utils.tracing import traceable  # noqa: E402
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
+from langchain_anthropic import ChatAnthropic
 
 # Model to use for the subagent
-_MODEL = "openai/gpt-oss-120b"
+#_MODEL = "openai/gpt-oss-120b"
+_MODEL = "claude-haiku-4-5"
 
 # Maximum agentic iterations to prevent infinite loops
 _MAX_ITERATIONS = 6
 
 # Module-level ChatGroq instance (reused across calls; thread-safe for invoke())
-_llm = ChatGroq(
-    model=_MODEL,
+# _llm = ChatGroq(
+#     model=_MODEL,
+#     temperature=0.0,
+#     max_tokens=4096,
+#     api_key=os.environ["GROQ_API_KEY"],
+# )
+
+_llm = ChatAnthropic(
+    model = _MODEL,
     temperature=0.0,
     max_tokens=4096,
-    api_key=os.environ["GROQ_API_KEY"],
+    api_key=os.environ["ANTHROPIC_API_KEY"]
 )
 
 # ---------------------------------------------------------------------------

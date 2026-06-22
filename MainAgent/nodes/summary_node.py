@@ -37,6 +37,7 @@ from MainAgent.db.postgres_client import (
 )
 from MainAgent.prompts import SUMMARIZATION_SYSTEM_PROMPT
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -50,6 +51,7 @@ _MODEL = "llama-3.3-70b-versatile"
 # Node
 # ---------------------------------------------------------------------------
 
+@traceable(name="summary_node", tags=["main-agent", "node"])
 async def summary_node(state: OrchestratorState) -> dict:
     """
     Generate an updated running summary if the unsummarized token count

@@ -32,8 +32,10 @@ from MainAgent.db.postgres_client import (
 )
 from MainAgent.db.redis_client import get_conversation_cache, set_conversation_cache
 from MainAgent.state import OrchestratorState
+from utils.tracing import traceable
 
 
+@traceable(name="load_memory_node", tags=["main-agent", "node"])
 async def load_memory_node(state: OrchestratorState) -> dict:
     """
     Load conversation memory from Redis (summary + messages) and

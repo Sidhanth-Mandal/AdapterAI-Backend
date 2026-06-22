@@ -9,7 +9,7 @@ You MUST gather all of the following before declaring satisfaction:
 1. **PRIMARY GOAL**: What does the user ultimately want the assistant to do? What problem does it solve?
 2. **DOMAIN & EXPERTISE**: What subject area? How deep should the assistant's knowledge go (beginner-friendly, technical expert, research-grade)?
 3. **DATA SOURCES**: What information does the assistant need access to? (APIs, databases, websites, files, real-time data, historical data?)
-4. **TOOL REQUIREMENTS**: What actions should the assistant be able to take? (fetch data, calculate, search, summarize, compare, visualize, alert?)
+4. **TOOL REQUIREMENTS**: What actions should the assistant be able to take? (fetch data, calculate, search, summarize)
 5. **OUTPUT FORMAT**: How should responses look? (bullet points, tables, prose, code, reports, conversational?)
 6. **PERSONALITY & TONE**: Should the assistant be formal, casual, scientific, encouraging, concise, verbose?
 7. **EDGE CASES & CONSTRAINTS**: What should the assistant avoid? Any topics, behaviors, or response types to restrict?

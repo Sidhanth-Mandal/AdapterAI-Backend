@@ -8,6 +8,44 @@ raw LLM response.
 import re
 from typing import Dict, List, Optional, Tuple
 
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schema for structured LLM output — replaces delimiter parsing
+# ---------------------------------------------------------------------------
+
+class PlannerOutput(BaseModel):
+    """
+    Structured output schema for the planner LLM call.
+
+    The LLM is instructed to populate this schema directly, so no regex
+    parsing of delimiters is required.  Each field maps to a downstream
+    consumer:
+
+    - ``tool_creation_prompt`` → passed to the ToolGeneration pipeline
+    - ``behavior_prompt``      → stored as the assistant's behavioral spec
+    """
+
+    tool_creation_prompt: str = Field(
+        description=(
+            "A full production-grade Tool Creation Prompt: a detailed "
+            "specification document (NOT Python code) for a downstream AI "
+            "that will write the Python tool functions for this assistant. "
+            "Must include context, per-tool specs, architecture requirements, "
+            "recommended libraries, and quality standards."
+        )
+    )
+    behavior_prompt: str = Field(
+        description=(
+            "The complete behavioral System Prompt for the final AI assistant. "
+            "Written as a direct instruction document (starting with 'You are…'). "
+            "Must cover identity, personality, communication style, domain "
+            "specialisation, tool-usage philosophy, clarification behaviour, "
+            "and safety rules."
+        )
+    )
+
 
 # ---------------------------------------------------------------------------
 # Delimiter constants — must match planner_system.txt exactly
@@ -20,7 +58,11 @@ _SP_END     = "--- END SYSTEM PROMPT ---"
 
 def extract_planner_outputs(raw_response: str) -> Tuple[str, str]:
     """
-    Parse the planner node's raw LLM output and return the two sections.
+    .. deprecated::
+        This function relied on delimiter markers in the raw LLM text and was
+        fragile.  The planner node now uses ``with_structured_output`` so the
+        model returns a validated :class:`PlannerOutput` dict directly.
+        This function is retained only for backward-compatibility with tests.
 
     Parameters
     ----------
@@ -30,12 +72,12 @@ def extract_planner_outputs(raw_response: str) -> Tuple[str, str]:
     Returns
     -------
     Tuple[str, str]
-        (tool_creation_prompt, system_prompt)
+        (tool_creation_prompt, behavior_prompt)
         Each is a stripped string. Returns ("", "") if parsing fails.
     """
     tool_creation_prompt = _extract_section(raw_response, _TCP_START, _TCP_END)
-    system_prompt        = _extract_section(raw_response, _SP_START,  _SP_END)
-    return tool_creation_prompt, system_prompt
+    behavior_prompt      = _extract_section(raw_response, _SP_START,  _SP_END)
+    return tool_creation_prompt, behavior_prompt
 
 
 def _extract_section(text: str, start_marker: str, end_marker: str) -> str:
@@ -161,8 +203,11 @@ def parse_mcq_questions(response_text: str) -> List[Dict]:
         r"b\)\s*(.+?)\n"          # b) ...
         r"c\)\s*(.+?)\n"          # c) ...
         r"d\)\s*(.+?)\n"          # d) ...
-        r"_{3,}.*",               # __________________ line
-        re.DOTALL,
+        r"_{3,}[^\n]*",           # __________________ line
+        # NOTE: re.DOTALL is intentionally omitted so that '.' does NOT
+        # match newlines.  Each option group must stay on a single line;
+        # using DOTALL caused (.+?) to span lines and merge all question
+        # blocks into one match, so only the last question was captured.
     )
 
     for m in block_pattern.finditer(response_text):
@@ -202,3 +247,9 @@ def extract_preamble(response_text: str) -> str:
     if first_question:
         return response_text[: first_question.start()].strip()
     return response_text.strip()
+
+
+#testing
+reponse_text = '''{'template_id': 'Testing', 'preamble': "Welcome! I'm excited to help you design your personalized AI assistant. Let's get started with a few quick questions to understand exactly what you need.", 'questions': [{'question': 'What is the main purpose of your assistant? What problem should it solve for you?', 'options': [{'label': 'a', 'text': 'Help me with research and information gathering'}, {'label': 'b', 'text': 'Assist with writing, editing, or content creation'}, {'label': 'c', 'text': 'Manage tasks, scheduling, or productivity'}, {'label': 'd', 'text': 'Answer questions in a specific domain (e.g., finance, health, law, tech)'}, {'label': 'custom', 'text': ''}]}], 'response': "Welcome! I'm excited to help you design your personalized AI assistant. Let's get started with a few quick questions to understand exactly what you need.\n\n**What is the main purpose of your assistant? What problem should it solve for you?**\na) Help me with research and information gathering\nb) Assist with writing, editing, or content creation\nc) Manage tasks, scheduling, or productivity\nd) Answer questions in a specific domain (e.g., finance, health, law, tech)\n__________________ (or tell us in your own words)\n\n**What subject area or domain should your assistant specialize in?**\na) General-purpose (no specific domain)\nb) Business, finance, or marketing\nc) Science, technology, or engineering\nd) Health, wellness, or lifestyle\n__________________ (or tell us in your own words)\n\n**What kind of information or data should your assistant have access to?**\na) Only my own documents or files I provide\nb) Real-time web search and current news/data\nc) Specific databases, APIs, or platforms (e.g., stock data, weather, social media)\nd) A combination of the above\n__________________ (or tell us in your own words)\n\n**How deep should your assistant's expertise go?**\na) Beginner-friendly — simple explanations, no jargon\nb) Intermediate — assumes some background knowledge\nc) Expert-level — technical, detailed, research-grade responses\nd) Adaptive — adjust based on how I phrase my questions\n__________________ (or tell us in your own words)"}'''
+
+print(parse_mcq_questions(response_text=reponse_text))

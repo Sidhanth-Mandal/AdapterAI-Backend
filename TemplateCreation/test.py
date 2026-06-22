@@ -166,7 +166,7 @@ def _satisfied_graph_result(extra_ai_content: str = "All requirements gathered."
         "phase": "planning",
         "requirements": {"type": "weather api"},
         "tool_creation_prompt": "",
-        "system_prompt": "",
+        "behavior_prompt": "",
     }
 
 
@@ -181,7 +181,7 @@ def _unsatisfied_graph_result(ai_content: str = "Can you tell me more?") -> dict
         "phase": "gathering",
         "requirements": {},
         "tool_creation_prompt": "",
-        "system_prompt": "",
+        "behavior_prompt": "",
     }
 
 
@@ -425,7 +425,7 @@ class TestGraphStateShape(unittest.TestCase):
         from typing import get_type_hints
         hints = get_type_hints(GraphState)
         required = {"messages", "phase", "satisfied", "requirements",
-                    "tool_creation_prompt", "system_prompt"}
+                    "tool_creation_prompt", "behavior_prompt"}
         missing = required - hints.keys()
         self.assertFalse(missing, f"GraphState is missing fields: {missing}")
         print("[PASS] GraphState has all required fields.")
@@ -437,7 +437,7 @@ class TestGraphStateShape(unittest.TestCase):
         self.assertIs(hints["satisfied"], bool)
         self.assertIs(hints["requirements"], dict)
         self.assertIs(hints["tool_creation_prompt"], str)
-        self.assertIs(hints["system_prompt"], str)
+        self.assertIs(hints["behavior_prompt"], str)
         print("[PASS] GraphState field types are correct.")
 
 
