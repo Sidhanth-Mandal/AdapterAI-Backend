@@ -1,0 +1,146 @@
+# ============================================================
+# AdapterAI — Unified docker-compose.yml
+#
+# Starts 4 containers with a single command:
+#   docker compose up --build
+#
+# Services:
+#   postgres   → port 5432  (+ pgadmin on 5050)
+#   redis      → port 6379  (+ RedisInsight on 8001)
+#   executor   → port 8000
+#   backend    → port 8002
+# ============================================================
+
+version: '3.9'
+
+# ── Shared network ────────────────────────────────────────────
+networks:
+  adapterai_net:
+    driver: bridge
+
+# ── Named volumes ─────────────────────────────────────────────
+volumes:
+  pgdata:
+  pgadmin_data:
+  redis_data:
+
+# ── Services ──────────────────────────────────────────────────
+services:
+
+  # ────────────────────────────────────────────────────────────
+  # 1. PostgreSQL  (main database)
+  # ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: adapterai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB:       ${POSTGRES_DB:-app_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./Docker_postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - adapterai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-app_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
+  # 2. pgAdmin  (optional DB UI)
+  # ────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: adapterai_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - adapterai_net
+
+  # ────────────────────────────────────────────────────────────
+  # 3. Redis Stack  (cache + RedisInsight UI)
+  # ────────────────────────────────────────────────────────────
+  redis:
+    image: redis/redis-stack:latest
+    container_name: adapterai_redis
+    restart: unless-stopped
+    environment:
+      REDIS_ARGS: "--save 60 1 --loglevel warning"
+    ports:
+      - "${REDIS_PORT:-6379}:6379"   # Redis
+      - "8001:8001"                  # RedisInsight
+    volumes:
+      - redis_data:/data
+    networks:
+      - adapterai_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
+  # 4. Tool Executor  (sandboxed code execution service)
+  # ────────────────────────────────────────────────────────────
+  executor:
+    build:
+      context: ./Docker_exec
+      dockerfile: Dockerfile
+    container_name: adapterai_executor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - adapterai_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
+  # 5. Backend  (FastAPI — all agents + REST API)
+  # ────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adapterai_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override localhost URLs with Docker service hostnames
+      POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-app_db}"
+      REDIS_URL:    "redis://redis:6379"
+      EXECUTOR_URL: "http://executor:8000"
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      executor:
+        condition: service_healthy
+    networks:
+      - adapterai_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

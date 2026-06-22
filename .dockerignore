@@ -1,0 +1,42 @@
+# ============================================================
+# .dockerignore — exclude large / unnecessary files from the
+# Docker build context sent to the daemon.
+# ============================================================
+
+# Python caches
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+
+# Virtual environments
+myenv/
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# Local environment files (injected via docker-compose env_file)
+.env
+
+# Dev / docs
+*.md
+testing/
+AdapterAI Animation/
+Animation 2/
+Removed Files/
+future_improvement.py
+project_explainer.md
+
+# Docker folders (not needed inside backend image)
+Docker_exec/
+Docker_postgresql/
+Docker_redis/
+
+# IDE
+.vscode/
+.idea/
