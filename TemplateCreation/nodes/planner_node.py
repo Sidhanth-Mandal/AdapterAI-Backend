@@ -20,7 +20,7 @@ Note: all terminal print output has been removed.
 import os
 from pathlib import Path
 
-from langchain_anthropic import ChatAnthropic
+from Config import claude_planner_llm as sllm
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from TemplateCreation.state import GraphState
@@ -33,23 +33,6 @@ from utils.tracing import traceable  # noqa: E402
 # ---------------------------------------------------------------------------
 _PROMPTS_DIR   = Path(__file__).resolve().parent.parent / "prompts"
 _SYSTEM_PROMPT = (_PROMPTS_DIR / "planner_system.txt").read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Anthropic LLM bound to structured output schema
-# ---------------------------------------------------------------------------
-def _build_llm() -> ChatAnthropic:
-    """Instantiate the Anthropic LLM for Phase 2 planning with structured output."""
-    llm = ChatAnthropic(
-        model="claude-haiku-4-5",
-        temperature=0.4,
-        max_tokens=8096,
-        streaming=False,
-        api_key=os.environ["ANTHROPIC_API_KEY"],
-    )
-    # Bind the Pydantic schema so the model always returns a validated
-    # {tool_creation_prompt, behavior_prompt} dict — no parsing required.
-    return llm.with_structured_output(PlannerOutput)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +115,7 @@ def planner_node(state: GraphState) -> dict:
         Partial state update containing tool_creation_prompt, behavior_prompt,
         and phase set to \"done\".
     """
-    llm = _build_llm()
+    llm = sllm.with_structured_output(PlannerOutput)
 
     planner_message = _build_planner_message(state)
     print(f"[TC:planner] ► planner_node fired | conversation messages: {len(state['messages'])}")

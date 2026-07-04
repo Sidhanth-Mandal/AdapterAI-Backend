@@ -47,8 +47,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langchain_groq import ChatGroq
-from langchain_anthropic import ChatAnthropic
+from Config import main_llm , MAX_TOOL_ITERATIONS , _MAX_TOOL_RESULT_CHARS
+from Config import _MAIN_MODEL as _MODEL
 
 try:
     # groq >= 0.9  — BadRequestError is the 400 class we want to catch
@@ -67,14 +67,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]  # AdapterAI/
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-MAX_TOOL_ITERATIONS = 10
-#_MODEL = "openai/gpt-oss-120b"    # switched from llama-3.3-70b-versatile
-_MODEL = "claude-sonnet-4-6"
-
-# ---------------------------------------------------------------------------
 # Tool imports (lazy-style: imported at module level but grouped clearly)
 # ---------------------------------------------------------------------------
 
@@ -90,8 +82,7 @@ from SubAgent.CustomToolSubAgent.calling import TOOLS as _CUSTOM_TOOLS  # noqa: 
 _DBG_SEP  = "-" * 60
 _DBG_THIN = "." * 60
 
-# Max chars kept from a tool result before truncating (prevents 413 errors)
-_MAX_TOOL_RESULT_CHARS = 3000
+
 
 
 def _safe_print(*args, **kwargs) -> None:
@@ -99,7 +90,7 @@ def _safe_print(*args, **kwargs) -> None:
     Print that survives Windows cp1252 consoles AND flushes immediately
     so output appears in real-time even when stdout is piped/buffered.
     Any character that cannot be encoded in the terminal's codec is
-    replaced with '?' so we never crash on Unicode from LLM responses.
+    replaced with '?' so we never crash on Unicode from main_llm responses.
     """
     import sys
     enc = sys.stdout.encoding or "utf-8"
@@ -110,7 +101,7 @@ def _safe_print(*args, **kwargs) -> None:
 
 def _extract_text(content) -> str:
     """
-    Safely extract a plain-text string from an LLM response's ``content``
+    Safely extract a plain-text string from an main_llm response's ``content``
     field, which may be either:
 
     * A plain ``str`` — returned as-is.
@@ -261,18 +252,9 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
     _safe_print(f"        User prompt     : {state['user_prompt'][:200]}")
     _safe_print(f"{'='*60}")
 
-    # ── LLM setup ─────────────────────────────────────────────────────────────
-    # llm = ChatGroq(
-    #     model=_MODEL,
-    #     temperature=0.0,
-    #     max_tokens=4096,
-    #     api_key=os.environ["GROQ_API_KEY"],
-    # )
-    llm = ChatAnthropic(model_name= _MODEL ,
-                        max_tokens=4096 ,
-                        api_key=os.environ["ANTHROPIC_API_KEY"])
+
     
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = main_llm.bind_tools(tools)
 
     # ── Config carries identity for tools that need it ────────────────────────
     runnable_config = RunnableConfig(configurable={
@@ -318,7 +300,7 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
                 "without calling any tools."
             ))
             messages.append(error_hint)
-            fallback = await llm.ainvoke(messages, config=runnable_config)
+            fallback = await main_llm.ainvoke(messages, config=runnable_config)
             messages.append(fallback)
             final_response = _extract_text(fallback.content)
             _dbg_final(final_response, "400 fallback to plain LLM")
@@ -372,7 +354,7 @@ async def orchestrator_agent_node(state: OrchestratorState) -> dict:
             "Based on all information gathered so far, provide your best "
             "final answer now. Do not make any more tool calls."
         )))
-        forced = await llm.ainvoke(messages, config=runnable_config)
+        forced = await main_llm.ainvoke(messages, config=runnable_config)
         messages.append(forced)
         final_response = _extract_text(forced.content)
         _dbg_final(final_response, f"max iterations ({MAX_TOOL_ITERATIONS}) reached")
@@ -445,13 +427,8 @@ async def orchestrator_agent_node_stream(
     _safe_print(f"               User prompt     : {state['user_prompt'][:200]}")
     _safe_print(f"{'='*60}")
 
-    # ── LLM setup ─────────────────────────────────────────────────────────────
-    llm = ChatAnthropic(
-        model_name=_MODEL,
-        max_tokens=4096,
-        api_key=os.environ["ANTHROPIC_API_KEY"],
-    )
-    llm_with_tools = llm.bind_tools(tools)
+    
+    llm_with_tools = main_llm.bind_tools(tools)
 
     # ── Config carries identity for tools that need it ────────────────────────
     runnable_config = RunnableConfig(configurable={
@@ -497,7 +474,7 @@ async def orchestrator_agent_node_stream(
 
             # Stream the fallback response
             accumulated = ""
-            async for chunk in llm.astream(messages, config=runnable_config):
+            async for chunk in main_llm.astream(messages, config=runnable_config):
                 chunk_text = _extract_text(chunk.content)
                 if chunk_text:
                     accumulated += chunk_text
@@ -581,7 +558,7 @@ async def orchestrator_agent_node_stream(
         )))
 
         accumulated = ""
-        async for chunk in llm.astream(messages, config=runnable_config):
+        async for chunk in main_llm.astream(messages, config=runnable_config):
             chunk_text = _extract_text(chunk.content)
             if chunk_text:
                 accumulated += chunk_text

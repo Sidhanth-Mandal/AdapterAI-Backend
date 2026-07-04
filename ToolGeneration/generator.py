@@ -22,8 +22,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
-from langchain_anthropic import ChatAnthropic
+from Config import CLAUDE_TOOL_GEN_LLM as _model
 
 
 from ToolGeneration.schemas import ToolSchema
@@ -40,9 +39,6 @@ from utils.tracing import traceable  # noqa: E402
 # Shared Groq client
 # ---------------------------------------------------------------------------
 
-_MODEL_NAME = "claude-sonnet-4-6"
-_model = ChatAnthropic(model=_MODEL_NAME)
-
 _SCHEMA_STR: str = json.dumps(ToolSchema.model_json_schema(), indent=2)
 
 _JSON_INSTRUCTION = f"""
@@ -52,7 +48,9 @@ No markdown, no explanation, no code fences.
 Schema:
 {_SCHEMA_STR}
 """
-
+# with open("example.txt", "w", encoding='utf-8') as file:
+#         file.write(system_prompt + _JSON_INSTRUCTION  )
+#         print("Done")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,7 +211,8 @@ def generate_tool_json(user_prompt: str) -> dict:
     # print(SystemMessage(content=system_prompt + _JSON_INSTRUCTION))
     # print(HumanMessage(content=user_prompt))
     # with open("example.txt", "w", encoding='utf-8') as file:
-    #     file.write(system_prompt + _JSON_INSTRUCTION + user_prompt )
+    #     file.write(system_prompt + _JSON_INSTRUCTION  )
+    #     print("Done")
     data = _parse_json(response.content)
     tool = ToolSchema.model_validate(data)
     return tool.model_dump()

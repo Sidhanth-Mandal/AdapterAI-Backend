@@ -26,6 +26,7 @@ COPY TemplateCreation/ ./TemplateCreation/
 COPY builtintools/   ./builtintools/
 COPY vector_store/   ./vector_store/
 COPY utils/          ./utils/
+COPY Config.py
 
 # ── Expose backend port ───────────────────────────────────────
 EXPOSE 8002

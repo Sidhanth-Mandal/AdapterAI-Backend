@@ -18,8 +18,7 @@ Note: all terminal print / streaming output has been removed.
 import os
 from pathlib import Path
 
-from langchain_groq import ChatGroq
-from langchain_anthropic import ChatAnthropic
+from Config import Template_Chat_llm as llm
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from TemplateCreation.state import GraphState
@@ -32,30 +31,6 @@ from utils.tracing import traceable  # noqa: E402
 # ---------------------------------------------------------------------------
 _PROMPTS_DIR   = Path(__file__).resolve().parent.parent / "prompts"
 _SYSTEM_PROMPT = (_PROMPTS_DIR / "chatbot_system.txt").read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Groq LLM
-# ---------------------------------------------------------------------------
-def _build_llm() -> ChatGroq:
-    """Instantiate the Groq LLM for Phase 1."""
-    # return ChatGroq(
-    #     model="openai/gpt-oss-120b",
-    #     temperature=0.7,
-    #     max_tokens=1024,
-    #     streaming=False,
-    #     api_key=os.environ["GROQ_API_KEY"],
-    # )
-
-    return ChatAnthropic(
-        model = 'claude-sonnet-4-6',
-        temperature= 0.7,
-        max_tokens =1024,
-        streaming= False,
-        api_key=os.environ["ANTHROPIC_API_KEY"]
-             
-        )
-
 
 # ---------------------------------------------------------------------------
 # Node function
@@ -87,8 +62,7 @@ def chatbot_node(state: GraphState) -> dict:
     dict
         Partial state update with new messages and updated phase / satisfied flags.
     """
-    llm = _build_llm()
-
+   
     # Build message list: system prompt + conversation history
     messages = [SystemMessage(content=_SYSTEM_PROMPT)] + list(state["messages"])
     print(f"[TC:chatbot] ► chatbot_node fired | total messages (incl. system): {len(messages)}")
