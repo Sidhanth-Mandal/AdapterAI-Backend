@@ -48,7 +48,7 @@
 ### 1 — Clone and enter the project
 
 ```bash
-git clone <your-repo-url> AdapterAI
+git clone https://github.com/Sidhanth-Mandal/AdapterAI-Backend.git
 cd AdapterAI
 ```
 
